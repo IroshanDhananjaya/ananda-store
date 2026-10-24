@@ -1,0 +1,107 @@
+@import "tailwindcss";
+
+@theme inline {
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+@theme {
+  /* Brand green — matches the header colour of the existing Google Sheets */
+  --color-brand-50: #f0f7f3;
+  --color-brand-100: #dcede3;
+  --color-brand-200: #bbdac9;
+  --color-brand-300: #8fc0a7;
+  --color-brand-400: #5f9f80;
+  --color-brand-500: #3d8263;
+  --color-brand-600: #2f6b51;
+  --color-brand-700: #275643;
+  --color-brand-800: #204537;
+  --color-brand-900: #1b392e;
+}
+
+body {
+  background: var(--color-slate-50);
+  color: var(--color-slate-900);
+}
+
+html[data-modal-open="true"] {
+  overflow: hidden;
+}
+
+/*
+ * Phones: table rows become cards (see StackBox in components/ui/table.tsx).
+ * Each cell shows its column name (data-label) on the left and the value on the right;
+ * cells with an input box put the name above it; cells without a name (row buttons,
+ * cells spanning the table) are plain. Unlayered, so these win over Tailwind classes.
+ */
+@media (max-width: 39.99rem) {
+  .stack-table table {
+    display: block;
+    width: 100%;
+    min-width: 0;
+  }
+  .stack-table thead {
+    display: none;
+  }
+  .stack-table tbody {
+    display: block;
+  }
+  .stack-table tr:not(.hidden) {
+    display: block;
+    padding: 0.75rem 1rem;
+  }
+  .stack-table td:not(.hidden) {
+    display: grid;
+    grid-template-columns: minmax(5.5rem, 40%) minmax(0, 1fr);
+    column-gap: 0.75rem;
+    align-items: start;
+    padding: 0.2rem 0;
+    text-align: right;
+    white-space: normal;
+  }
+  .stack-table td::before {
+    content: attr(data-label);
+    grid-row: 1 / span 12;
+    text-align: left;
+    font-size: 0.75rem;
+    font-weight: 500;
+    line-height: 1.25rem;
+    color: var(--color-slate-500);
+  }
+  /* Values sit on the right at their own size (badges don't stretch) */
+  .stack-table td[data-label] > * {
+    justify-self: end;
+  }
+  .stack-table td:not([data-label]):not(.hidden),
+  .stack-table td[data-label=""]:not(.hidden) {
+    display: block;
+    text-align: left;
+  }
+  .stack-table td:not([data-label])::before,
+  .stack-table td[data-label=""]::before {
+    content: none;
+  }
+  .stack-table td[data-label]:has(input:not([type="checkbox"]), select, textarea):not(.hidden) {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 0.25rem;
+    padding: 0.35rem 0;
+    text-align: left;
+  }
+  .stack-table td:has(input:not([type="checkbox"]), select, textarea)::before {
+    grid-row: auto;
+  }
+  .stack-table td[data-label]:has(input:not([type="checkbox"]), select, textarea) > * {
+    justify-self: stretch;
+  }
+  .stack-table td input,
+  .stack-table td select {
+    min-width: 0;
+  }
+}
+
+/* Native date/time pickers: keep the icon tinted like the rest of the UI */
+input[type="date"]::-webkit-calendar-picker-indicator,
+input[type="time"]::-webkit-calendar-picker-indicator {
+  opacity: 0.55;
+  cursor: pointer;
+}

@@ -1,0 +1,1363 @@
+{
+  "id": "577ecfbd-4d10-4b88-a52f-7d8729b432f6",
+  "prevId": "9ff62c28-3542-429d-96ea-be155398a7a9",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.expenses": {
+      "name": "expenses",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "seq": {
+          "name": "seq",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": {
+            "type": "always",
+            "name": "expenses_seq_seq",
+            "schema": "public",
+            "increment": "1",
+            "startWith": "1",
+            "minValue": "1",
+            "maxValue": "9223372036854775807",
+            "cache": "1",
+            "cycle": false
+          }
+        },
+        "expense_no": {
+          "name": "expense_no",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "date": {
+          "name": "date",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "category": {
+          "name": "category",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "description": {
+          "name": "description",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "amount": {
+          "name": "amount",
+          "type": "numeric(12, 2)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "method": {
+          "name": "method",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "expenses_expenseNo_unique": {
+          "name": "expenses_expenseNo_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "expense_no"
+          ]
+        }
+      },
+      "policies": {
+        "no_api_access": {
+          "name": "no_api_access",
+          "as": "PERMISSIVE",
+          "for": "ALL",
+          "to": [
+            "anon",
+            "authenticated"
+          ],
+          "using": "false",
+          "withCheck": "false"
+        }
+      },
+      "checkConstraints": {},
+      "isRLSEnabled": true
+    },
+    "public.items": {
+      "name": "items",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "seq": {
+          "name": "seq",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": {
+            "type": "always",
+            "name": "items_seq_seq",
+            "schema": "public",
+            "increment": "1",
+            "startWith": "1",
+            "minValue": "1",
+            "maxValue": "9223372036854775807",
+            "cache": "1",
+            "cycle": false
+          }
+        },
+        "sap_code": {
+          "name": "sap_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "description": {
+          "name": "description",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "package_details": {
+          "name": "package_details",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "uom": {
+          "name": "uom",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "cost_price": {
+          "name": "cost_price",
+          "type": "numeric(12, 2)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "wholesale_price": {
+          "name": "wholesale_price",
+          "type": "numeric(12, 2)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "retail_price": {
+          "name": "retail_price",
+          "type": "numeric(12, 2)",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "items_sapCode_unique": {
+          "name": "items_sapCode_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "sap_code"
+          ]
+        }
+      },
+      "policies": {
+        "no_api_access": {
+          "name": "no_api_access",
+          "as": "PERMISSIVE",
+          "for": "ALL",
+          "to": [
+            "anon",
+            "authenticated"
+          ],
+          "using": "false",
+          "withCheck": "false"
+        }
+      },
+      "checkConstraints": {},
+      "isRLSEnabled": true
+    },
+    "public.locations": {
+      "name": "locations",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "seq": {
+          "name": "seq",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": {
+            "type": "always",
+            "name": "locations_seq_seq",
+            "schema": "public",
+            "increment": "1",
+            "startWith": "1",
+            "minValue": "1",
+            "maxValue": "9223372036854775807",
+            "cache": "1",
+            "cycle": false
+          }
+        },
+        "location_number": {
+          "name": "location_number",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "item_group": {
+          "name": "item_group",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "locations_locationNumber_unique": {
+          "name": "locations_locationNumber_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "location_number"
+          ]
+        }
+      },
+      "policies": {
+        "no_api_access": {
+          "name": "no_api_access",
+          "as": "PERMISSIVE",
+          "for": "ALL",
+          "to": [
+            "anon",
+            "authenticated"
+          ],
+          "using": "false",
+          "withCheck": "false"
+        }
+      },
+      "checkConstraints": {},
+      "isRLSEnabled": true
+    },
+    "public.order_items": {
+      "name": "order_items",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "seq": {
+          "name": "seq",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": {
+            "type": "always",
+            "name": "order_items_seq_seq",
+            "schema": "public",
+            "increment": "1",
+            "startWith": "1",
+            "minValue": "1",
+            "maxValue": "9223372036854775807",
+            "cache": "1",
+            "cycle": false
+          }
+        },
+        "order_id": {
+          "name": "order_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "item_code": {
+          "name": "item_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "ordered_qty": {
+          "name": "ordered_qty",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "received_qty": {
+          "name": "received_qty",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "unit_price": {
+          "name": "unit_price",
+          "type": "numeric(12, 2)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "discount": {
+          "name": "discount",
+          "type": "numeric(12, 2)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "remarks": {
+          "name": "remarks",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "posted_location": {
+          "name": "posted_location",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "order_items_order_id_orders_order_id_fk": {
+          "name": "order_items_order_id_orders_order_id_fk",
+          "tableFrom": "order_items",
+          "tableTo": "orders",
+          "columnsFrom": [
+            "order_id"
+          ],
+          "columnsTo": [
+            "order_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "order_items_item_code_items_sap_code_fk": {
+          "name": "order_items_item_code_items_sap_code_fk",
+          "tableFrom": "order_items",
+          "tableTo": "items",
+          "columnsFrom": [
+            "item_code"
+          ],
+          "columnsTo": [
+            "sap_code"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "order_items_orderId_itemCode_unique": {
+          "name": "order_items_orderId_itemCode_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "order_id",
+            "item_code"
+          ]
+        }
+      },
+      "policies": {
+        "no_api_access": {
+          "name": "no_api_access",
+          "as": "PERMISSIVE",
+          "for": "ALL",
+          "to": [
+            "anon",
+            "authenticated"
+          ],
+          "using": "false",
+          "withCheck": "false"
+        }
+      },
+      "checkConstraints": {},
+      "isRLSEnabled": true
+    },
+    "public.orders": {
+      "name": "orders",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "seq": {
+          "name": "seq",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": {
+            "type": "always",
+            "name": "orders_seq_seq",
+            "schema": "public",
+            "increment": "1",
+            "startWith": "1",
+            "minValue": "1",
+            "maxValue": "9223372036854775807",
+            "cache": "1",
+            "cycle": false
+          }
+        },
+        "order_id": {
+          "name": "order_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "invoice_number": {
+          "name": "invoice_number",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "po_number": {
+          "name": "po_number",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "order_date": {
+          "name": "order_date",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "received_date": {
+          "name": "received_date",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "received_time": {
+          "name": "received_time",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "cheque_number": {
+          "name": "cheque_number",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "cheque_deposit_date": {
+          "name": "cheque_deposit_date",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "total_bill_amount": {
+          "name": "total_bill_amount",
+          "type": "numeric(12, 2)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "discount_percent": {
+          "name": "discount_percent",
+          "type": "numeric(5, 2)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "posted_to_stock": {
+          "name": "posted_to_stock",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "orders_orderId_unique": {
+          "name": "orders_orderId_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "order_id"
+          ]
+        }
+      },
+      "policies": {
+        "no_api_access": {
+          "name": "no_api_access",
+          "as": "PERMISSIVE",
+          "for": "ALL",
+          "to": [
+            "anon",
+            "authenticated"
+          ],
+          "using": "false",
+          "withCheck": "false"
+        }
+      },
+      "checkConstraints": {},
+      "isRLSEnabled": true
+    },
+    "public.payment_allocations": {
+      "name": "payment_allocations",
+      "schema": "",
+      "columns": {
+        "payment_id": {
+          "name": "payment_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "position": {
+          "name": "position",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "sale_id": {
+          "name": "sale_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "amount": {
+          "name": "amount",
+          "type": "numeric(12, 2)",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "payment_allocations_payment_id_payments_id_fk": {
+          "name": "payment_allocations_payment_id_payments_id_fk",
+          "tableFrom": "payment_allocations",
+          "tableTo": "payments",
+          "columnsFrom": [
+            "payment_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "payment_allocations_sale_id_sales_id_fk": {
+          "name": "payment_allocations_sale_id_sales_id_fk",
+          "tableFrom": "payment_allocations",
+          "tableTo": "sales",
+          "columnsFrom": [
+            "sale_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "payment_allocations_payment_id_position_pk": {
+          "name": "payment_allocations_payment_id_position_pk",
+          "columns": [
+            "payment_id",
+            "position"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {
+        "no_api_access": {
+          "name": "no_api_access",
+          "as": "PERMISSIVE",
+          "for": "ALL",
+          "to": [
+            "anon",
+            "authenticated"
+          ],
+          "using": "false",
+          "withCheck": "false"
+        }
+      },
+      "checkConstraints": {},
+      "isRLSEnabled": true
+    },
+    "public.payments": {
+      "name": "payments",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "seq": {
+          "name": "seq",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": {
+            "type": "always",
+            "name": "payments_seq_seq",
+            "schema": "public",
+            "increment": "1",
+            "startWith": "1",
+            "minValue": "1",
+            "maxValue": "9223372036854775807",
+            "cache": "1",
+            "cycle": false
+          }
+        },
+        "receipt_no": {
+          "name": "receipt_no",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "date": {
+          "name": "date",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "shop_id": {
+          "name": "shop_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "amount": {
+          "name": "amount",
+          "type": "numeric(12, 2)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "method": {
+          "name": "method",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "cheque_number": {
+          "name": "cheque_number",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "cheque_date": {
+          "name": "cheque_date",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "reference": {
+          "name": "reference",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "payments_shop_id_shops_id_fk": {
+          "name": "payments_shop_id_shops_id_fk",
+          "tableFrom": "payments",
+          "tableTo": "shops",
+          "columnsFrom": [
+            "shop_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "payments_receiptNo_unique": {
+          "name": "payments_receiptNo_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "receipt_no"
+          ]
+        }
+      },
+      "policies": {
+        "no_api_access": {
+          "name": "no_api_access",
+          "as": "PERMISSIVE",
+          "for": "ALL",
+          "to": [
+            "anon",
+            "authenticated"
+          ],
+          "using": "false",
+          "withCheck": "false"
+        }
+      },
+      "checkConstraints": {},
+      "isRLSEnabled": true
+    },
+    "public.routes": {
+      "name": "routes",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "seq": {
+          "name": "seq",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": {
+            "type": "always",
+            "name": "routes_seq_seq",
+            "schema": "public",
+            "increment": "1",
+            "startWith": "1",
+            "minValue": "1",
+            "maxValue": "9223372036854775807",
+            "cache": "1",
+            "cycle": false
+          }
+        },
+        "route_code": {
+          "name": "route_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "route_name": {
+          "name": "route_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "area": {
+          "name": "area",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "visit_days": {
+          "name": "visit_days",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::text[]"
+        },
+        "sales_rep": {
+          "name": "sales_rep",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "vehicle_number": {
+          "name": "vehicle_number",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "active": {
+          "name": "active",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "routes_routeCode_unique": {
+          "name": "routes_routeCode_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "route_code"
+          ]
+        }
+      },
+      "policies": {
+        "no_api_access": {
+          "name": "no_api_access",
+          "as": "PERMISSIVE",
+          "for": "ALL",
+          "to": [
+            "anon",
+            "authenticated"
+          ],
+          "using": "false",
+          "withCheck": "false"
+        }
+      },
+      "checkConstraints": {},
+      "isRLSEnabled": true
+    },
+    "public.sale_lines": {
+      "name": "sale_lines",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "sale_id": {
+          "name": "sale_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "position": {
+          "name": "position",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "sap_code": {
+          "name": "sap_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "location_number": {
+          "name": "location_number",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "qty": {
+          "name": "qty",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "unit_price": {
+          "name": "unit_price",
+          "type": "numeric(12, 2)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "cost_price": {
+          "name": "cost_price",
+          "type": "numeric(12, 2)",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "sale_lines_sale_id_sales_id_fk": {
+          "name": "sale_lines_sale_id_sales_id_fk",
+          "tableFrom": "sale_lines",
+          "tableTo": "sales",
+          "columnsFrom": [
+            "sale_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "sale_lines_sap_code_items_sap_code_fk": {
+          "name": "sale_lines_sap_code_items_sap_code_fk",
+          "tableFrom": "sale_lines",
+          "tableTo": "items",
+          "columnsFrom": [
+            "sap_code"
+          ],
+          "columnsTo": [
+            "sap_code"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "sale_lines_saleId_sapCode_locationNumber_unique": {
+          "name": "sale_lines_saleId_sapCode_locationNumber_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "sale_id",
+            "sap_code",
+            "location_number"
+          ]
+        }
+      },
+      "policies": {
+        "no_api_access": {
+          "name": "no_api_access",
+          "as": "PERMISSIVE",
+          "for": "ALL",
+          "to": [
+            "anon",
+            "authenticated"
+          ],
+          "using": "false",
+          "withCheck": "false"
+        }
+      },
+      "checkConstraints": {},
+      "isRLSEnabled": true
+    },
+    "public.sales": {
+      "name": "sales",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "seq": {
+          "name": "seq",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": {
+            "type": "always",
+            "name": "sales_seq_seq",
+            "schema": "public",
+            "increment": "1",
+            "startWith": "1",
+            "minValue": "1",
+            "maxValue": "9223372036854775807",
+            "cache": "1",
+            "cycle": false
+          }
+        },
+        "sale_no": {
+          "name": "sale_no",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "date": {
+          "name": "date",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "shop_id": {
+          "name": "shop_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "rep_name": {
+          "name": "rep_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "discount": {
+          "name": "discount",
+          "type": "numeric(12, 2)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "loaded_date": {
+          "name": "loaded_date",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "vehicle_number": {
+          "name": "vehicle_number",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "delivered_date": {
+          "name": "delivered_date",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "due_date": {
+          "name": "due_date",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "notes": {
+          "name": "notes",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "sales_shop_id_shops_id_fk": {
+          "name": "sales_shop_id_shops_id_fk",
+          "tableFrom": "sales",
+          "tableTo": "shops",
+          "columnsFrom": [
+            "shop_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "sales_saleNo_unique": {
+          "name": "sales_saleNo_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "sale_no"
+          ]
+        }
+      },
+      "policies": {
+        "no_api_access": {
+          "name": "no_api_access",
+          "as": "PERMISSIVE",
+          "for": "ALL",
+          "to": [
+            "anon",
+            "authenticated"
+          ],
+          "using": "false",
+          "withCheck": "false"
+        }
+      },
+      "checkConstraints": {
+        "sales_status": {
+          "name": "sales_status",
+          "value": "\"sales\".\"status\" in ('Ordered', 'Loaded', 'Delivered')"
+        }
+      },
+      "isRLSEnabled": true
+    },
+    "public.shops": {
+      "name": "shops",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "seq": {
+          "name": "seq",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": {
+            "type": "always",
+            "name": "shops_seq_seq",
+            "schema": "public",
+            "increment": "1",
+            "startWith": "1",
+            "minValue": "1",
+            "maxValue": "9223372036854775807",
+            "cache": "1",
+            "cycle": false
+          }
+        },
+        "shop_code": {
+          "name": "shop_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "shop_name": {
+          "name": "shop_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "owner_name": {
+          "name": "owner_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "phone": {
+          "name": "phone",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "address": {
+          "name": "address",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "town": {
+          "name": "town",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "map_link": {
+          "name": "map_link",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "route_id": {
+          "name": "route_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "credit_limit": {
+          "name": "credit_limit",
+          "type": "numeric(12, 2)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "credit_days": {
+          "name": "credit_days",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "opening_balance": {
+          "name": "opening_balance",
+          "type": "numeric(12, 2)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "active": {
+          "name": "active",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "notes": {
+          "name": "notes",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "shops_route_id_routes_id_fk": {
+          "name": "shops_route_id_routes_id_fk",
+          "tableFrom": "shops",
+          "tableTo": "routes",
+          "columnsFrom": [
+            "route_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "shops_shopCode_unique": {
+          "name": "shops_shopCode_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "shop_code"
+          ]
+        }
+      },
+      "policies": {
+        "no_api_access": {
+          "name": "no_api_access",
+          "as": "PERMISSIVE",
+          "for": "ALL",
+          "to": [
+            "anon",
+            "authenticated"
+          ],
+          "using": "false",
+          "withCheck": "false"
+        }
+      },
+      "checkConstraints": {},
+      "isRLSEnabled": true
+    },
+    "public.stock": {
+      "name": "stock",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "seq": {
+          "name": "seq",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": {
+            "type": "always",
+            "name": "stock_seq_seq",
+            "schema": "public",
+            "increment": "1",
+            "startWith": "1",
+            "minValue": "1",
+            "maxValue": "9223372036854775807",
+            "cache": "1",
+            "cycle": false
+          }
+        },
+        "sap_code": {
+          "name": "sap_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "location_number": {
+          "name": "location_number",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "available_qty": {
+          "name": "available_qty",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "issued_qty": {
+          "name": "issued_qty",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "last_update": {
+          "name": "last_update",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "stock_sap_code_items_sap_code_fk": {
+          "name": "stock_sap_code_items_sap_code_fk",
+          "tableFrom": "stock",
+          "tableTo": "items",
+          "columnsFrom": [
+            "sap_code"
+          ],
+          "columnsTo": [
+            "sap_code"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "stock_sapCode_locationNumber_unique": {
+          "name": "stock_sapCode_locationNumber_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "sap_code",
+            "location_number"
+          ]
+        }
+      },
+      "policies": {
+        "no_api_access": {
+          "name": "no_api_access",
+          "as": "PERMISSIVE",
+          "for": "ALL",
+          "to": [
+            "anon",
+            "authenticated"
+          ],
+          "using": "false",
+          "withCheck": "false"
+        }
+      },
+      "checkConstraints": {
+        "stock_qty_not_negative": {
+          "name": "stock_qty_not_negative",
+          "value": "\"stock\".\"available_qty\" >= 0 and \"stock\".\"issued_qty\" >= 0"
+        }
+      },
+      "isRLSEnabled": true
+    }
+  },
+  "enums": {},
+  "schemas": {},
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}

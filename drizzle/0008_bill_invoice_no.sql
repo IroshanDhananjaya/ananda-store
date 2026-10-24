@@ -1,0 +1,1 @@
+ALTER TABLE "sales" ADD COLUMN "invoice_no" text DEFAULT '' NOT NULL;
