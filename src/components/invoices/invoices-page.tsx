@@ -17,6 +17,7 @@ import type { Sale } from "@/lib/types";
 import { useDialog } from "@/lib/use-dialog";
 import { addDays, cn, formatDate, formatMoney, formatQty, monthStartISO, todayISO, weekdayOf, weekStartISO } from "@/lib/utils";
 import { BillStatusMenu } from "@/components/sales/bill-status-menu";
+import { CashSheet } from "./cash-sheet";
 import { LoadingList } from "./loading-list";
 
 type Preset = "today" | "yesterday" | "week" | "month" | "custom";
@@ -121,8 +122,9 @@ function InvoicesPage({ initialRouteId, initialShopId, initialView }: { initialR
 
   const route = routeMap.get(routeId);
   const shop = shopMap.get(shopId);
+  const period = from === to ? dayLabel(from) : `${formatDate(from)} – ${formatDate(to)}`;
   const summary = [
-    from === to ? dayLabel(from) : `${formatDate(from)} – ${formatDate(to)}`,
+    period,
     dateBy === "bill" ? "by bill date" : "by delivered date",
     route ? `${route.routeCode} · ${route.routeName}` : "all routes",
     shop ? `${shop.shopCode} · ${shop.shopName}` : "all stores",
@@ -130,240 +132,247 @@ function InvoicesPage({ initialRouteId, initialShopId, initialView }: { initialR
 
   return (
     <>
-      <PageHeader
-        title={view === "items" ? "Loading List" : "Daily Invoices"}
-        description={summary}
-        actions={
-          <div className="flex flex-wrap gap-2 print:hidden">
-            <Button variant="outline" onClick={() => window.print()}>
-              <Printer /> Print
-            </Button>
-            <Button variant="outline" onClick={() => setLoading(true)}>
-              <Truck /> Load lorry{toLoad.length > 0 && ` (${toLoad.length})`}
-            </Button>
-            <Link href={shopId ? `/sales/new?store=${shopId}` : "/sales/new"} className={buttonClass()}>
-              <Plus /> New bill
-            </Link>
-          </div>
-        }
-      />
-
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <SummaryTile
-          label="Invoices"
-          value={formatQty(rows.length)}
-          sub={`${plural(sum(rows, units), "unit")} · ${plural(days.length, "day")}`}
-        />
-        <SummaryTile
-          label="Invoice total"
-          value={formatMoney(total)}
-          sub={rows.length ? `Average ${formatMoney(total / rows.length)}` : "No invoices"}
-        />
-        <SummaryTile label="Collected" value={formatMoney(paid)} sub="Paid against these invoices" tone="good" />
-        <SummaryTile
-          label="Cash balance"
-          value={formatMoney(balance)}
-          sub={
-            overdue.length
-              ? `${plural(overdue.length, "invoice")} overdue`
-              : notDelivered.length
-                ? `${plural(notDelivered.length, "invoice")} not delivered yet`
-                : "Still to collect"
-          }
-          tone={overdue.length ? "danger" : "default"}
-        />
-      </div>
-
-      <div className="mt-6 print:hidden">
-        <FilterTabs<View>
-          value={view}
-          onChange={setView}
-          options={[
-            { value: "invoices", label: "Invoices", count: rows.length },
-            { value: "items", label: "Loading list (item totals)", count: itemCount },
-          ]}
-        />
-      </div>
-
-      <Card className="mt-3">
-        <div className="print:hidden">
-          <Toolbar>
-            <FilterTabs<Preset>
-              value={preset}
-              onChange={choosePreset}
-              options={[
-                { value: "today", label: "Today" },
-                { value: "yesterday", label: "Yesterday" },
-                { value: "week", label: "This week" },
-                { value: "month", label: "This month" },
-                { value: "custom", label: "Custom" },
-              ]}
-            />
-            <div className="flex w-full items-center gap-2 sm:w-auto">
-              <Input
-                type="date"
-                value={range.from}
-                onChange={(e) => {
-                  setPreset("custom");
-                  setRange((r) => ({ ...r, from: e.target.value || r.from }));
-                }}
-                className="h-9 min-w-0 flex-1 sm:w-40 sm:flex-none"
-                aria-label="From date"
-              />
-              <span className="text-sm text-slate-500">to</span>
-              <Input
-                type="date"
-                value={range.to}
-                onChange={(e) => {
-                  setPreset("custom");
-                  setRange((r) => ({ ...r, to: e.target.value || r.to }));
-                }}
-                className="h-9 min-w-0 flex-1 sm:w-40 sm:flex-none"
-                aria-label="To date"
-              />
+      {/* The invoices view prints as the cash sheet below instead of this screen */}
+      <div className={cn(view === "invoices" && "print:hidden")}>
+        <PageHeader
+          title={view === "items" ? "Loading List" : "Daily Invoices"}
+          description={summary}
+          actions={
+            <div className="flex flex-wrap gap-2 print:hidden">
+              <Button variant="outline" onClick={() => window.print()}>
+                <Printer /> {view === "invoices" ? "Print cash sheet" : "Print"}
+              </Button>
+              <Button variant="outline" onClick={() => setLoading(true)}>
+                <Truck /> Load lorry{toLoad.length > 0 && ` (${toLoad.length})`}
+              </Button>
+              <Link href={shopId ? `/sales/new?store=${shopId}` : "/sales/new"} className={buttonClass()}>
+                <Plus /> New bill
+              </Link>
             </div>
-            <Select
-              value={dateBy}
-              onChange={(e) => setDateBy(e.target.value as DateBy)}
-              className="h-9 sm:ml-auto sm:w-44"
-              aria-label="Which date to use"
-            >
-              <option value="bill">By bill date</option>
-              <option value="delivered">By delivered date</option>
-            </Select>
-          </Toolbar>
-          <Toolbar>
-            <Select value={routeId} onChange={(e) => chooseRoute(e.target.value)} className="h-9 sm:w-56" aria-label="Filter by route">
-              <option value="">All routes</option>
-              {routes.map((r) => (
-                <option key={r.id} value={r.id}>
-                  {r.routeCode} · {r.routeName}
-                </option>
-              ))}
-            </Select>
-            <Select value={shopId} onChange={(e) => setShopId(e.target.value)} className="h-9 sm:w-64" aria-label="Filter by store">
-              <option value="">{route ? `All stores on ${route.routeCode}` : "All stores"}</option>
-              {shopOptions.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.shopCode} · {s.shopName}
-                  {s.active ? "" : " (inactive)"}
-                </option>
-              ))}
-            </Select>
-            {view === "items" && (
-              <SearchInput
-                placeholder="Search item…"
-                value={itemQuery}
-                onChange={(e) => setItemQuery(e.target.value)}
-                className="sm:ml-auto"
-              />
-            )}
-          </Toolbar>
+          }
+        />
+
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <SummaryTile
+            label="Invoices"
+            value={formatQty(rows.length)}
+            sub={`${plural(sum(rows, units), "unit")} · ${plural(days.length, "day")}`}
+          />
+          <SummaryTile
+            label="Invoice total"
+            value={formatMoney(total)}
+            sub={rows.length ? `Average ${formatMoney(total / rows.length)}` : "No invoices"}
+          />
+          <SummaryTile label="Collected" value={formatMoney(paid)} sub="Paid against these invoices" tone="good" />
+          <SummaryTile
+            label="Cash balance"
+            value={formatMoney(balance)}
+            sub={
+              overdue.length
+                ? `${plural(overdue.length, "invoice")} overdue`
+                : notDelivered.length
+                  ? `${plural(notDelivered.length, "invoice")} not delivered yet`
+                  : "Still to collect"
+            }
+            tone={overdue.length ? "danger" : "default"}
+          />
         </div>
 
-        {view === "items" ? (
-          <LoadingList sales={live} query={itemQuery} />
-        ) : (
-          <>
-            <Table>
-              <THead>
-                <tr>
-                  <TH>Bill No.</TH>
-                  <TH>Store</TH>
-                  <TH>Items</TH>
-                  <TH className="text-right">Total</TH>
-                  <TH className="text-right">Paid</TH>
-                  <TH className="text-right">Cash Balance</TH>
-                  <TH>Status</TH>
-                  <TH className="print:hidden">Change Status</TH>
-                  <TH className="w-28 print:hidden">
-                    <span className="sr-only">Actions</span>
-                  </TH>
-                </tr>
-              </THead>
-              <TBody>
-                {rows.length === 0 && (
-                  <EmptyRow colSpan={9}>
-                    No invoices for these dates{dateBy === "delivered" ? " (only delivered bills have a delivered date)" : ""}.
-                  </EmptyRow>
-                )}
-                {days.map(([day, list]) => (
-                  <DayGroup key={day} day={day} count={counted(list).length} total={sum(list, (s) => due(s).total)} paid={sum(list, (s) => due(s).paid)} balance={sum(list, (s) => due(s).due)}>
-                    {list.map((s) => {
-                      const shop = shopMap.get(s.shopId);
-                      const d = due(s);
-                      return (
-                        <TR
-                          key={s.id}
-                          className={cn("cursor-pointer", d.overdueDays > 0 && "bg-red-50/40", s.status === "Cancelled" && "bg-slate-50/70 opacity-70")}
-                          onClick={() => router.push(`/sales/${s.id}`)}
-                        >
-                          <TD>
-                            <span className="block font-semibold text-brand-700">{s.saleNo}</span>
-                            {s.invoiceNo && <span className="block font-mono text-xs text-slate-600">{s.invoiceNo}</span>}
-                            <span className="block text-xs text-slate-500">
-                              {dateBy === "delivered" ? `Billed ${formatDate(s.date)}` : s.repName || "—"}
-                            </span>
-                          </TD>
-                          <TD className="whitespace-normal">
-                            <span className="block font-medium text-slate-900">{shop?.shopName ?? "Deleted store"}</span>
-                            <span className="block text-xs text-slate-500">
-                              {shop?.shopCode}
-                              {shop && routeMap.get(shop.routeId) ? ` · ${routeMap.get(shop.routeId)!.routeCode}` : ""}
-                            </span>
-                          </TD>
-                          <TD>
-                            <span className="block">{plural(s.lines.length, "item")}</span>
-                            <span className="block text-xs text-slate-500">{plural(units(s), "unit")}</span>
-                          </TD>
-                          <TD className="text-right tabular-nums">{formatMoney(d.total)}</TD>
-                          <TD className="text-right text-emerald-700 tabular-nums">{d.paid ? formatMoney(d.paid) : "—"}</TD>
-                          <TD className={cn("text-right font-semibold tabular-nums", d.due > 0 ? "text-slate-900" : "text-slate-400")}>
-                            {d.delivered ? formatMoney(d.due) : "—"}
-                          </TD>
-                          <TD>
-                            <BillStatusBadge status={d.status} late={s.late} />
-                          </TD>
-                          <TD className="print:hidden" onClick={(e) => e.stopPropagation()}>
-                            <BillStatusMenu sale={s} />
-                          </TD>
-                          <TD className="print:hidden" onClick={(e) => e.stopPropagation()}>
-                            <RowActions>
-                              <Link href={`/sales/${s.id}`} className={buttonClass("ghost", "icon")} aria-label={`View ${s.saleNo}`} title="View">
-                                <Eye />
-                              </Link>
-                              {s.status !== "Cancelled" && (
-                                <Link href={`/sales/${s.id}/edit`} className={buttonClass("ghost", "icon")} aria-label={`Edit ${s.saleNo}`} title="Edit">
-                                  <Pencil />
-                                </Link>
-                              )}
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="hover:bg-red-50 hover:text-red-600"
-                                onClick={() => remove.open(s)}
-                                aria-label={`Delete ${s.saleNo}`}
-                                title="Delete"
-                              >
-                                <Trash2 />
-                              </Button>
-                            </RowActions>
-                          </TD>
-                        </TR>
-                      );
-                    })}
-                  </DayGroup>
+        <div className="mt-6 print:hidden">
+          <FilterTabs<View>
+            value={view}
+            onChange={setView}
+            options={[
+              { value: "invoices", label: "Invoices", count: rows.length },
+              { value: "items", label: "Loading list (item totals)", count: itemCount },
+            ]}
+          />
+        </div>
+
+        <Card className="mt-3">
+          <div className="print:hidden">
+            <Toolbar>
+              <FilterTabs<Preset>
+                value={preset}
+                onChange={choosePreset}
+                options={[
+                  { value: "today", label: "Today" },
+                  { value: "yesterday", label: "Yesterday" },
+                  { value: "week", label: "This week" },
+                  { value: "month", label: "This month" },
+                  { value: "custom", label: "Custom" },
+                ]}
+              />
+              <div className="flex w-full items-center gap-2 sm:w-auto">
+                <Input
+                  type="date"
+                  value={range.from}
+                  onChange={(e) => {
+                    setPreset("custom");
+                    setRange((r) => ({ ...r, from: e.target.value || r.from }));
+                  }}
+                  className="h-9 min-w-0 flex-1 sm:w-40 sm:flex-none"
+                  aria-label="From date"
+                />
+                <span className="text-sm text-slate-500">to</span>
+                <Input
+                  type="date"
+                  value={range.to}
+                  onChange={(e) => {
+                    setPreset("custom");
+                    setRange((r) => ({ ...r, to: e.target.value || r.to }));
+                  }}
+                  className="h-9 min-w-0 flex-1 sm:w-40 sm:flex-none"
+                  aria-label="To date"
+                />
+              </div>
+              <Select
+                value={dateBy}
+                onChange={(e) => setDateBy(e.target.value as DateBy)}
+                className="h-9 sm:ml-auto sm:w-44"
+                aria-label="Which date to use"
+              >
+                <option value="bill">By bill date</option>
+                <option value="delivered">By delivered date</option>
+              </Select>
+            </Toolbar>
+            <Toolbar>
+              <Select value={routeId} onChange={(e) => chooseRoute(e.target.value)} className="h-9 sm:w-56" aria-label="Filter by route">
+                <option value="">All routes</option>
+                {routes.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.routeCode} · {r.routeName}
+                  </option>
                 ))}
-              </TBody>
-            </Table>
-            <TableFooter>
-              {plural(live.length, "invoice")} on {plural(days.length, "day")}
-              {cancelled > 0 && ` (+ ${cancelled} cancelled, not counted)`} · Total {formatMoney(total)} · Paid {formatMoney(paid)} ·{" "}
-              <span className="font-medium text-slate-700">Cash balance {formatMoney(balance)}</span>
-            </TableFooter>
-          </>
-        )}
-      </Card>
+              </Select>
+              <Select value={shopId} onChange={(e) => setShopId(e.target.value)} className="h-9 sm:w-64" aria-label="Filter by store">
+                <option value="">{route ? `All stores on ${route.routeCode}` : "All stores"}</option>
+                {shopOptions.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.shopCode} · {s.shopName}
+                    {s.active ? "" : " (inactive)"}
+                  </option>
+                ))}
+              </Select>
+              {view === "items" && (
+                <SearchInput
+                  placeholder="Search item…"
+                  value={itemQuery}
+                  onChange={(e) => setItemQuery(e.target.value)}
+                  className="sm:ml-auto"
+                />
+              )}
+            </Toolbar>
+          </div>
+
+          {view === "items" ? (
+            <LoadingList sales={live} query={itemQuery} />
+          ) : (
+            <>
+              <Table>
+                <THead>
+                  <tr>
+                    <TH>Bill No.</TH>
+                    <TH>Store</TH>
+                    <TH>Items</TH>
+                    <TH className="text-right">Total</TH>
+                    <TH className="text-right">Paid</TH>
+                    <TH className="text-right">Cash Balance</TH>
+                    <TH>Status</TH>
+                    <TH className="print:hidden">Change Status</TH>
+                    <TH className="w-28 print:hidden">
+                      <span className="sr-only">Actions</span>
+                    </TH>
+                  </tr>
+                </THead>
+                <TBody>
+                  {rows.length === 0 && (
+                    <EmptyRow colSpan={9}>
+                      No invoices for these dates{dateBy === "delivered" ? " (only delivered bills have a delivered date)" : ""}.
+                    </EmptyRow>
+                  )}
+                  {days.map(([day, list]) => (
+                    <DayGroup key={day} day={day} count={counted(list).length} total={sum(list, (s) => due(s).total)} paid={sum(list, (s) => due(s).paid)} balance={sum(list, (s) => due(s).due)}>
+                      {list.map((s) => {
+                        const shop = shopMap.get(s.shopId);
+                        const d = due(s);
+                        return (
+                          <TR
+                            key={s.id}
+                            className={cn("cursor-pointer", d.overdueDays > 0 && "bg-red-50/40", s.status === "Cancelled" && "bg-slate-50/70 opacity-70")}
+                            onClick={() => router.push(`/sales/${s.id}`)}
+                          >
+                            <TD>
+                              <span className="block font-semibold text-brand-700">{s.saleNo}</span>
+                              {s.invoiceNo && <span className="block font-mono text-xs text-slate-600">{s.invoiceNo}</span>}
+                              <span className="block text-xs text-slate-500">
+                                {dateBy === "delivered" ? `Billed ${formatDate(s.date)}` : s.repName || "—"}
+                              </span>
+                            </TD>
+                            <TD className="whitespace-normal">
+                              <span className="block font-medium text-slate-900">{shop?.shopName ?? "Deleted store"}</span>
+                              <span className="block text-xs text-slate-500">
+                                {shop?.shopCode}
+                                {shop && routeMap.get(shop.routeId) ? ` · ${routeMap.get(shop.routeId)!.routeCode}` : ""}
+                              </span>
+                            </TD>
+                            <TD>
+                              <span className="block">{plural(s.lines.length, "item")}</span>
+                              <span className="block text-xs text-slate-500">{plural(units(s), "unit")}</span>
+                            </TD>
+                            <TD className="text-right tabular-nums">{formatMoney(d.total)}</TD>
+                            <TD className="text-right text-emerald-700 tabular-nums">{d.paid ? formatMoney(d.paid) : "—"}</TD>
+                            <TD className={cn("text-right font-semibold tabular-nums", d.due > 0 ? "text-slate-900" : "text-slate-400")}>
+                              {d.delivered ? formatMoney(d.due) : "—"}
+                            </TD>
+                            <TD>
+                              <BillStatusBadge status={d.status} late={s.late} />
+                            </TD>
+                            <TD className="print:hidden" onClick={(e) => e.stopPropagation()}>
+                              <BillStatusMenu sale={s} />
+                            </TD>
+                            <TD className="print:hidden" onClick={(e) => e.stopPropagation()}>
+                              <RowActions>
+                                <Link href={`/sales/${s.id}`} className={buttonClass("ghost", "icon")} aria-label={`View ${s.saleNo}`} title="View">
+                                  <Eye />
+                                </Link>
+                                {s.status !== "Cancelled" && (
+                                  <Link href={`/sales/${s.id}/edit`} className={buttonClass("ghost", "icon")} aria-label={`Edit ${s.saleNo}`} title="Edit">
+                                    <Pencil />
+                                  </Link>
+                                )}
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="hover:bg-red-50 hover:text-red-600"
+                                  onClick={() => remove.open(s)}
+                                  aria-label={`Delete ${s.saleNo}`}
+                                  title="Delete"
+                                >
+                                  <Trash2 />
+                                </Button>
+                              </RowActions>
+                            </TD>
+                          </TR>
+                        );
+                      })}
+                    </DayGroup>
+                  ))}
+                </TBody>
+              </Table>
+              <TableFooter>
+                {plural(live.length, "invoice")} on {plural(days.length, "day")}
+                {cancelled > 0 && ` (+ ${cancelled} cancelled, not counted)`} · Total {formatMoney(total)} · Paid {formatMoney(paid)} ·{" "}
+                <span className="font-medium text-slate-700">Cash balance {formatMoney(balance)}</span>
+              </TableFooter>
+            </>
+          )}
+        </Card>
+      </div>
+
+      {view === "invoices" && (
+        <CashSheet sales={live} dateOf={dateOf} period={period} route={route} storeName={shop?.shopName} />
+      )}
 
       <LoadLorryDialog open={loading} onClose={() => setLoading(false)} preselect={preselect} />
       <ConfirmDialog
