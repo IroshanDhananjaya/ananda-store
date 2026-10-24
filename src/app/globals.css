@@ -31,6 +31,9 @@
   --color-accent-900: #7b300c;
 }
 
+/* Phones with a short screen (iPhone SE, small Androids): `short:` tightens a page to fit on them */
+@custom-variant short (@media (max-width: 39.99rem) and (max-height: 40rem));
+
 body {
   background: var(--color-slate-50);
   color: var(--color-slate-900);
@@ -108,6 +111,18 @@ html[data-modal-open="true"] {
   .stack-table td input,
   .stack-table td select {
     min-width: 0;
+  }
+}
+
+/*
+ * iPhone Safari zooms the page in when a box with text under 16px is tapped, and doesn't
+ * zoom back out. Touch screens get 16px text in every box. Unlayered, so it wins over text-sm.
+ */
+@media (pointer: coarse) {
+  input:not([type="checkbox"], [type="radio"]),
+  select,
+  textarea {
+    font-size: 16px;
   }
 }
 

@@ -12,5 +12,10 @@ export function createSupabase(cookies: CookieMethodsServer) {
     throw new Error(
       "SUPABASE_URL or SUPABASE_PUBLISHABLE_KEY is not set. Copy them from your Supabase project (Project Settings > API Keys) into .env.local.",
     );
-  return createServerClient(url, key, { cookies });
+  return createServerClient(url, key, {
+    cookies,
+    // Only the server uses the login, so scripts in the page can't read it (httpOnly);
+    // once deployed it's only sent over HTTPS (local dev may be plain http)
+    cookieOptions: { httpOnly: true, secure: process.env.NODE_ENV === "production" },
+  });
 }

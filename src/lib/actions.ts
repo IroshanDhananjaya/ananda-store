@@ -1,7 +1,6 @@
 "use server";
 
 import { cookies } from "next/headers";
-import { redirect, RedirectType } from "next/navigation";
 import { getDb } from "@/db";
 import { applyAction, fetchData, type ActionResponse } from "@/db/repo";
 import { ACTION_NAMES, fail, type ActionName, type Data } from "./core";
@@ -33,7 +32,8 @@ async function signedInEmail(): Promise<string | null> {
   return data ? (data.claims.email ?? "") : null;
 }
 
-export type SignInState = { error: string };
+/** `next`: signed in, the page to open (the login form loads it) */
+export type SignInState = { error: string; next?: string };
 
 export async function signIn(_prev: SignInState, form: FormData): Promise<SignInState> {
   const email = String(form.get("email") ?? "").trim();
@@ -48,9 +48,21 @@ export async function signIn(_prev: SignInState, form: FormData): Promise<SignIn
     return { error: "Couldn't sign in. Check the internet connection and try again." };
   }
 
-  // Only a path on this site: "//other.site" would send the user away
-  const next = String(form.get("next") ?? "");
-  redirect(next.startsWith("/") && !next.startsWith("//") && !next.startsWith("/\\") ? next : "/", RedirectType.replace);
+  return { error: "", next: pathOnThisSite(String(form.get("next") ?? "")) };
+}
+
+/**
+ * `next` if it's a page on this site, otherwise "/". Read the way the browser will read it:
+ * "//other.site", "/\other.site" and "/<tab>/other.site" all lead to another site.
+ */
+function pathOnThisSite(next: string): string {
+  const here = "http://this.site";
+  try {
+    const url = new URL(next, here);
+    return next.startsWith("/") && url.origin === here ? url.pathname + url.search + url.hash : "/";
+  } catch {
+    return "/";
+  }
 }
 
 /** Signs out on this device only; anyone else using the same login stays signed in */
