@@ -6,17 +6,29 @@
 }
 
 @theme {
-  /* Brand green — matches the header colour of the existing Google Sheets */
-  --color-brand-50: #f0f7f3;
-  --color-brand-100: #dcede3;
-  --color-brand-200: #bbdac9;
-  --color-brand-300: #8fc0a7;
-  --color-brand-400: #5f9f80;
-  --color-brand-500: #3d8263;
-  --color-brand-600: #2f6b51;
-  --color-brand-700: #275643;
-  --color-brand-800: #204537;
-  --color-brand-900: #1b392e;
+  /* Brand blue: the Ananda Stores logo's "A" (light #01a1f4 to navy #002362) */
+  --color-brand-50: #eef6ff;
+  --color-brand-100: #d9ebff;
+  --color-brand-200: #b9dbff;
+  --color-brand-300: #86c3fd;
+  --color-brand-400: #3fa3f6;
+  --color-brand-500: #0b85e8;
+  --color-brand-600: #0a63c9;
+  --color-brand-700: #0a4ea3;
+  --color-brand-800: #083d84;
+  --color-brand-900: #062a5f;
+
+  /* Accent orange: the logo's swoosh and cart (#fd6a04). Small text uses 700 for contrast. */
+  --color-accent-50: #fff6ed;
+  --color-accent-100: #ffead3;
+  --color-accent-200: #ffd0a5;
+  --color-accent-300: #ffae6d;
+  --color-accent-400: #ff8a3d;
+  --color-accent-500: #fd6a04;
+  --color-accent-600: #e85a00;
+  --color-accent-700: #c04502;
+  --color-accent-800: #98370b;
+  --color-accent-900: #7b300c;
 }
 
 body {

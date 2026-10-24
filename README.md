@@ -1,6 +1,6 @@
-# Raigam Store Management
+# Ananda Stores
 
-A web app for running the distribution business: buying stock from Raigam, keeping it in the warehouse,
+A web app for running Ananda Stores' distribution business: buying stock from Raigam, keeping it in the warehouse,
 and selling it to stores (shops) along delivery routes while tracking what each store owes.
 It replaces the Google Sheets tables (Order Details, Order Item Details, Store Details, Items, Store Location).
 
@@ -20,6 +20,22 @@ pnpm install
 pnpm db:migrate   # creates the tables
 pnpm db:seed      # optional: loads the sample data
 ```
+
+## Set up login (once)
+
+The app needs a login (Supabase Auth, free). Each person who uses it gets an email and password; there is
+no sign-up page, so only people you add can get in.
+
+1. In Supabase, open **Project Settings → API Keys**. Copy the project URL and the **Publishable key**
+   (`sb_publishable_…`; the older *anon* key also works) into `.env.local` as `SUPABASE_URL` and
+   `SUPABASE_PUBLISHABLE_KEY`.
+2. **Authentication → Users → Add user → Create new user**: enter an email and password and tick
+   *Auto Confirm User*. Do this for everyone who uses the app. To change a forgotten password, open the user there.
+3. **Authentication → Sign In / Providers**: turn off **Allow new users to sign up**, so no one can make
+   their own account.
+
+Everyone who signs in can see and change all the data. **Sign out** is at the bottom of the sidebar; it only
+signs out that device.
 
 ## Run it
 
@@ -68,10 +84,11 @@ item is already kept. Items must already be in *Items*, and an invoice number ca
 `ALLOW_DEMO_RESET=true` in `.env.local` shows **Reset demo data** in the sidebar, which replaces all data with the
 sample data for everyone. Set it to `false` before you start entering real data.
 
-### Before putting it on the internet
+### Login
 
-There is **no login yet**: anyone who can open the app can read and change the data. That's fine on your own
-computer, but add login (Supabase Auth, also free) before hosting it online.
+Signed-out visitors are sent to `/login` (`src/proxy.ts`), and every server action checks the login again
+before it reads or saves anything, so the data stays private even if the proxy doesn't run. When the hosting
+site asks for environment variables, add `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY` as well as `DATABASE_URL`.
 
 ## Pages
 
@@ -162,6 +179,9 @@ Status flow: `Pending delivery → Received → Posted to stock`.
 ```
 src/
   app/                    routes (thin server pages that render the components below)
+    (app)/                every page with the sidebar (the folder name isn't part of the URL)
+    login/                sign-in page
+  proxy.ts                sends signed-out visitors to /login and keeps the login cookies fresh
   components/
     routes/  shops/       routes and stores (a store is called "Shop" in code)
     profit/  expenses/    profit report (with chart) and expenses
@@ -170,7 +190,8 @@ src/
     order-items/          order items page
     stock/  items/  locations/  dashboard/
     ui/                   buttons, form controls, modal, table, badges
-    app-shell.tsx         sidebar layout, loads data from the server, toasts, "Saving…" indicator
+    auth/                 sign-in form
+    app-shell.tsx         sidebar layout, loads data from the server, toasts, "Saving…" indicator, sign out
   db/
     schema.ts             Postgres tables (Drizzle)
     repo.ts               load rows into the app's shapes; run an action in a transaction and save what changed
@@ -179,7 +200,8 @@ src/
     types.ts              data model (mirrors the sheets)
     seed.ts               sample data
     core.ts               every action's rules and validation (runs on the server)
-    actions.ts            server actions: fetchAllData, runAction
+    actions.ts            server actions: signIn, signOut, fetchAllData, runAction (each checks the login)
+    supabase.ts           Supabase Auth client (SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY)
     store.ts              zustand store in the browser: a copy of the data; actions call the server
     ledger.ts             cash balance, per-bill balances, overdue, payment-to-bill links, statements
     profit.ts             monthly / yearly profit, profit by item / route, expenses by category

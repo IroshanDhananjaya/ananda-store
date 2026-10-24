@@ -2,13 +2,13 @@
 
 import {
   ArchiveRestore,
-  Boxes,
   CalendarDays,
   ClipboardList,
   Gift,
   HandCoins,
   LayoutDashboard,
   ListChecks,
+  LogOut,
   MapPin,
   Menu,
   Package,
@@ -25,8 +25,10 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { startTransition, Suspense, useEffect, useState, type ReactNode } from "react";
 import { Toaster, toast } from "sonner";
+import { LogoMark } from "@/components/logo";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Button } from "@/components/ui/button";
+import { signOut } from "@/lib/actions";
 import { useAppStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
@@ -85,7 +87,10 @@ function NavLinks({ pathname, onNavigate }: { pathname: string | null; onNavigat
                 onClick={onNavigate}
                 className={cn(
                   "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
-                  active ? "bg-white/15 text-white" : "text-brand-100 hover:bg-white/10 hover:text-white",
+                  // Orange bar on the current page, like the logo's swoosh
+                  active
+                    ? "bg-white/15 text-white shadow-[inset_3px_0_0_var(--color-accent-500)]"
+                    : "text-brand-100 hover:bg-white/10 hover:text-white",
                 )}
               >
                 <Icon className="size-4.5 shrink-0" />
@@ -106,16 +111,44 @@ function ActiveNavLinks({ onNavigate }: { onNavigate?: () => void }) {
   return <NavLinks pathname={pathname} onNavigate={onNavigate} />;
 }
 
+/** Who is signed in, and Sign out. A full page load of /login, so no data is left in the browser. */
+function UserBox() {
+  const userEmail = useAppStore((s) => s.userEmail);
+  const [signingOut, setSigningOut] = useState(false);
+  const handleSignOut = async () => {
+    setSigningOut(true);
+    const result = await signOut().catch(() => null);
+    if (result?.ok) return window.location.replace("/login");
+    setSigningOut(false);
+    toast.error(result?.error ?? "Couldn't reach the server. Check the internet connection and try again.");
+  };
+  return (
+    <div className="flex items-center gap-2 border-t border-white/10 px-2 pt-4">
+      <span className="min-w-0 flex-1 truncate text-xs text-brand-200" title={userEmail}>
+        {userEmail}
+      </span>
+      <button
+        type="button"
+        onClick={handleSignOut}
+        disabled={signingOut}
+        className="inline-flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-white hover:bg-white/10 disabled:opacity-50"
+      >
+        <LogOut className="size-3.5" /> {signingOut ? "Signing out…" : "Sign out"}
+      </button>
+    </div>
+  );
+}
+
 function SidebarContent({ onNavigate, onReset }: { onNavigate?: () => void; onReset: () => void }) {
   const canResetDemo = useAppStore((s) => s.canResetDemo);
   return (
     <div className="flex h-full flex-col gap-6 overflow-y-auto px-4 py-5">
       <Link href="/" onClick={onNavigate} className="flex items-center gap-3 px-2">
-        <span className="grid size-9 place-items-center rounded-lg bg-white/15 text-white">
-          <Boxes className="size-5" />
+        <span className="grid size-10 shrink-0 place-items-center rounded-lg bg-white">
+          <LogoMark size={32} />
         </span>
         <span className="leading-tight">
-          <span className="block text-sm font-semibold text-white">Raigam Store</span>
+          <span className="block text-sm font-semibold text-white">Ananda Stores</span>
           <span className="block text-xs text-brand-200">Store Management</span>
         </span>
       </Link>
@@ -124,15 +157,18 @@ function SidebarContent({ onNavigate, onReset }: { onNavigate?: () => void; onRe
         <ActiveNavLinks onNavigate={onNavigate} />
       </Suspense>
 
-      {canResetDemo && (
-        <div className="mt-auto rounded-lg bg-white/5 p-3 text-xs text-brand-100">
-          <p className="font-medium text-white">Demo mode</p>
-          <p className="mt-1 text-brand-200">Sample data, shared by everyone using the app.</p>
-          <button type="button" onClick={onReset} className="mt-2 inline-flex items-center gap-1.5 font-medium text-white hover:underline">
-            <RotateCcw className="size-3.5" /> Reset demo data
-          </button>
-        </div>
-      )}
+      <div className="mt-auto flex flex-col gap-4">
+        {canResetDemo && (
+          <div className="rounded-lg bg-white/5 p-3 text-xs text-brand-100">
+            <p className="font-medium text-white">Demo mode</p>
+            <p className="mt-1 text-brand-200">Sample data, shared by everyone using the app.</p>
+            <button type="button" onClick={onReset} className="mt-2 inline-flex items-center gap-1.5 font-medium text-white hover:underline">
+              <RotateCcw className="size-3.5" /> Reset demo data
+            </button>
+          </div>
+        )}
+        <UserBox />
+      </div>
     </div>
   );
 }
@@ -239,7 +275,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             <Menu className="size-5" />
           </button>
           <span className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-            <Boxes className="size-4 text-brand-600" /> Raigam Store
+            <LogoMark size={24} /> Ananda Stores
           </span>
         </header>
 

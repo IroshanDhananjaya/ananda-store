@@ -23,11 +23,19 @@ type Status = {
   /** True while a change is being saved */
   saving: boolean;
   canResetDemo: boolean;
+  /** Who is signed in */
+  userEmail: string;
   /** Fetch everything again (on start, and when the user comes back to the tab) */
   reload: () => Promise<void>;
 };
 
 export type AppStore = Data & AsyncActions & Status;
+
+/** The login has ended (signed out elsewhere, or removed in Supabase): sign in again, then come back here */
+function goToLogin() {
+  const here = window.location.pathname + window.location.search;
+  window.location.replace(here === "/" ? "/login" : `/login?next=${encodeURIComponent(here)}`);
+}
 
 export const useAppStore = create<AppStore>()((set, get) => {
   const call =
@@ -37,7 +45,8 @@ export const useAppStore = create<AppStore>()((set, get) => {
       if (get().saving) return fail("Still saving the last change. Please wait a moment.");
       set({ saving: true });
       try {
-        const { result, changes } = await runAction(name, args, todayISO());
+        const { result, changes, signedOut } = await runAction(name, args, todayISO());
+        if (signedOut) goToLogin();
         set(changes);
         return result;
       } catch {
@@ -54,10 +63,13 @@ export const useAppStore = create<AppStore>()((set, get) => {
     loadError: "",
     saving: false,
     canResetDemo: false,
+    userEmail: "",
     reload: async () => {
       try {
-        const { data, canResetDemo } = await fetchAllData();
-        set({ ...data, canResetDemo, loaded: true, loadError: "" });
+        const response = await fetchAllData();
+        if ("signedOut" in response) return goToLogin();
+        const { data, canResetDemo, userEmail } = response;
+        set({ ...data, canResetDemo, userEmail, loaded: true, loadError: "" });
       } catch {
         set({ loadError: "Couldn't load the store data from the database." });
       }

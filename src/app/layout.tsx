@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
-import { AppShell } from "@/components/app-shell";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -15,8 +14,8 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: {
-    default: "Raigam Store Management",
-    template: "%s · Raigam Store",
+    default: "Ananda Stores",
+    template: "%s · Ananda Stores",
   },
   description: "Manage incoming orders, stock, items and store locations.",
 };
@@ -24,9 +23,7 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="en" className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}>
-      <body className="min-h-full font-sans">
-        <AppShell>{children}</AppShell>
-      </body>
+      <body className="min-h-full font-sans">{children}</body>
     </html>
   );
 }
