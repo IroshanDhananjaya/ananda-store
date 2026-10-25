@@ -1,5 +1,6 @@
 import type { StateCreator } from "zustand";
 import { billDiscount, linkUnlinkedPayments, normalizeAllocations, payableBills, saleSubtotal, stockIsOut, unlinkedAmount } from "./ledger";
+import { isRaigamBill, NEW_STORE_CREDIT_DAYS, planRaigamSync, putLink, type ItemPicks, type RaigamBill } from "./raigam";
 import { returnKey, returnStock, sentMoreThanCollected } from "./returns";
 import {
   seedExpenses,
@@ -28,6 +29,7 @@ import {
   type OrderPayment,
   type Payment,
   type PaymentInput,
+  type RaigamLink,
   type RaigamReturn,
   type RaigamReturnInput,
   type Result,
@@ -70,6 +72,7 @@ export type Data = {
   payments: Payment[];
   expenses: Expense[];
   raigamReturns: RaigamReturn[];
+  raigamLinks: RaigamLink[];
 };
 
 export const DATA_KEYS = [
@@ -84,6 +87,7 @@ export const DATA_KEYS = [
   "payments",
   "expenses",
   "raigamReturns",
+  "raigamLinks",
 ] as const satisfies readonly (keyof Data)[];
 
 export type Actions = {
@@ -144,12 +148,16 @@ export type Actions = {
   cancelSale: (id: string) => Result;
   /** Undo a cancel: the bill waits to load again */
   restoreSale: (id: string) => Result;
+  /** Tick (or untick) bills as compared with Raigam's printed bill */
+  markChecked: (ids: string[], checked: boolean) => Result;
 
   addPayment: (input: PaymentInput) => Result;
   updatePayment: (id: string, input: PaymentInput) => Result;
   deletePayment: (id: string) => Result;
   /** Link a store's unlinked payment money to its oldest open bills */
   linkPayments: (shopId: string) => Result;
+  /** A cheque was collected from the store on `date`; "" puts it back to still to collect */
+  markChequeCollected: (id: string, date: string) => Result;
 
   addExpense: (input: ExpenseInput) => Result;
   updateExpense: (id: string, input: ExpenseInput) => Result;
@@ -159,6 +167,13 @@ export type Actions = {
   sendReturnsToRaigam: (input: RaigamReturnInput) => Result;
   /** Delete a return note: its items are back in the return items store */
   deleteRaigamReturn: (id: string) => Result;
+
+  /**
+   * Sync from Raigam (src/lib/raigam.ts): adds new bills (and a store with just its name for a new outlet),
+   * updates bills not delivered yet that changed on Raigam, and remembers the item matches picked.
+   * Bills that can't be saved are left out and listed in `notes`; the rest is saved.
+   */
+  syncRaigamBills: (bills: RaigamBill[], itemPicks: ItemPicks) => Result;
 
   /** Replace everything with the sample data */
   resetDemoData: () => Result;
@@ -203,15 +218,18 @@ export const ACTION_NAMES = [
   "markLate",
   "cancelSale",
   "restoreSale",
+  "markChecked",
   "addPayment",
   "updatePayment",
   "deletePayment",
   "linkPayments",
+  "markChequeCollected",
   "addExpense",
   "updateExpense",
   "deleteExpense",
   "sendReturnsToRaigam",
   "deleteRaigamReturn",
+  "syncRaigamBills",
   "resetDemoData",
 ] as const satisfies readonly ActionName[];
 
@@ -233,6 +251,7 @@ export const emptyData = (): Data => ({
   payments: [],
   expenses: [],
   raigamReturns: [],
+  raigamLinks: [],
 });
 
 export const seedData = (): Data => ({
@@ -247,6 +266,7 @@ export const seedData = (): Data => ({
   payments: seedPayments,
   expenses: seedExpenses,
   raigamReturns: [],
+  raigamLinks: [],
 });
 
 export const pickData = (s: Data): Data => Object.fromEntries(DATA_KEYS.map((k) => [k, s[k]])) as Data;
@@ -255,6 +275,7 @@ export const ok = (id?: string): Result => ({ ok: true, id });
 export const fail = (error: string): Result => ({ ok: false, error });
 
 const isWholeNumber = (n: number) => Number.isInteger(n) && n >= 0;
+const isISODate = (s: unknown) => typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s);
 
 function validateLine(line: OrderLineInput, items: Item[]): string | null {
   if (!items.some((i) => i.sapCode === line.itemCode)) return `Unknown item code "${line.itemCode}".`;
@@ -392,7 +413,10 @@ function validateSale(input: SaleInput, items: Item[], shops: Shop[], sales: Sal
   for (const l of input.lines) {
     if (!items.some((i) => i.sapCode === l.sapCode)) return `Unknown item "${l.sapCode}".`;
     if (!l.locationNumber) return `Choose the stock location for ${l.sapCode}.`;
-    if (!Number.isInteger(l.qty) || l.qty <= 0) return `Quantity for ${l.sapCode} must be a whole number above 0.`;
+    const takenOff = l.takenOff ?? 0;
+    if (!Number.isInteger(takenOff) || takenOff < 0) return `Qty taken off ${l.sapCode} must be a whole number, 0 or more.`;
+    // 0 only for an item taken off the bill on Raigam (kept to show as on Raigam's bill)
+    if (!Number.isInteger(l.qty) || l.qty < 0 || (l.qty === 0 && takenOff === 0)) return `Quantity for ${l.sapCode} must be a whole number above 0.`;
     if (!Number.isInteger(l.freeQty) || l.freeQty < 0) return `Free issue qty for ${l.sapCode} must be a whole number, 0 or more.`;
     if (!Number.isFinite(l.unitPrice) || l.unitPrice < 0) return `Unit price for ${l.sapCode} must be 0 or more.`;
     if (!(l.discountPct >= 0 && l.discountPct <= 100)) return `Discount for ${l.sapCode} must be a % from 0 to 100.`;
@@ -415,7 +439,7 @@ function cleanSale(
   input: SaleInput,
   items: Item[],
   existing?: Sale,
-): Omit<Sale, "id" | "saleNo" | "status" | "late" | "loadedDate" | "vehicleNumber" | "deliveredDate"> {
+): Omit<Sale, "id" | "saleNo" | "status" | "late" | "loadedDate" | "vehicleNumber" | "deliveredDate" | "checked" | "deliveryNote" | "extraCredit"> {
   const savedCost = new Map(existing?.lines.map((l) => [l.sapCode, l.costPrice]));
   // Editing a delivered bill keeps what was cancelled at delivery
   const savedCancel = new Map(existing?.lines.map((l) => [`${l.sapCode}|${l.locationNumber}`, l.cancelQty]));
@@ -425,6 +449,7 @@ function cleanSale(
     locationNumber: l.locationNumber,
     qty: l.qty,
     freeQty: l.freeQty,
+    takenOff: l.takenOff ?? 0,
     unitPrice: round2(l.unitPrice),
     discountPct: round2(l.discountPct),
     cancelQty: Math.min(savedCancel.get(`${l.sapCode}|${l.locationNumber}`) ?? 0, l.qty),
@@ -488,7 +513,9 @@ function validatePayment(input: PaymentInput, shops: Shop[], sales: Sale[], paym
   if (!shop) return "Select a store.";
   if (!(input.amount > 0)) return "Amount must be more than 0.";
   if (!PAYMENT_METHODS.includes(input.method)) return "Select a payment method.";
-  if (input.method === "Cheque" && !input.chequeNumber.trim()) return "Cheque number is required for cheque payments.";
+  // A cheque still to collect may not have its number yet
+  if (input.method === "Cheque" && input.chequeCollectedDate && !input.chequeNumber.trim()) return "Enter the cheque number of the collected cheque.";
+  if (input.method === "Cheque" && input.chequeCollectedDate && !isISODate(input.chequeCollectedDate)) return "Enter the date the cheque was collected.";
 
   // Bills this payment links to must be open (or not delivered yet), and not over-paid
   const bills = new Map(payableBills(shop, sales, payments.filter((p) => p.id !== id)).map((b) => [b.id, b]));
@@ -509,6 +536,8 @@ function cleanPayment(input: PaymentInput): PaymentInput {
     amount: round2(input.amount),
     chequeNumber: cheque ? input.chequeNumber.trim() : "",
     chequeDate: cheque ? input.chequeDate : "",
+    // Older screens don't send it: still to collect
+    chequeCollectedDate: cheque ? (input.chequeCollectedDate ?? "") : "",
     reference: input.reference.trim(),
     allocations: input.allocations.filter((a) => a.amount > 0).map((a) => ({ saleId: a.saleId, amount: round2(a.amount) })),
   };
@@ -985,6 +1014,9 @@ export const createCore =
         saleNo: nextCode(sales.map((s) => s.saleNo), "SI", 4),
         status: "Ordered",
         late: false,
+        checked: false,
+        deliveryNote: "",
+        extraCredit: 0,
         loadedDate: "",
         vehicleNumber: "",
         deliveredDate: "",
@@ -1031,6 +1063,9 @@ export const createCore =
               saleNo: existing.saleNo,
               status: existing.status,
               late: existing.late,
+              checked: existing.checked,
+              deliveryNote: existing.deliveryNote,
+              extraCredit: existing.extraCredit,
               loadedDate: existing.loadedDate,
               vehicleNumber: existing.vehicleNumber,
               deliveredDate: existing.deliveredDate,
@@ -1125,6 +1160,9 @@ export const createCore =
       const gross = saleSubtotal({ lines, returns });
       if (gross < -0.004) return fail("The returns are worth more than the items on this bill.");
       nextStock = returnToStock(nextStock, cancelMoves(lines), input.date);
+      // Credit added on this bill (left out = keep what it had)
+      const extraCredit = round2(input.extraCredit ?? sale.extraCredit);
+      if (!Number.isFinite(extraCredit) || extraCredit < 0) return fail("Credit amount must be 0 or more.");
 
       const nextSales = sales.map((x) =>
         x.id === id
@@ -1137,6 +1175,8 @@ export const createCore =
               loadedDate: x.loadedDate || input.date,
               deliveredDate: input.date,
               dueDate: input.dueDate,
+              deliveryNote: input.note === undefined ? x.deliveryNote : input.note.trim(),
+              extraCredit,
             }
           : x,
       );
@@ -1216,6 +1256,16 @@ export const createCore =
       set((s) => ({ sales: s.sales.map((x) => (x.id === id ? { ...x, status: "Ordered" as const } : x)) }));
       return ok(id);
     },
+    markChecked: (ids, checked) => {
+      if (!Array.isArray(ids) || ids.length === 0) return fail("Select at least one bill.");
+      const marking = new Set(ids);
+      const bills = get().sales.filter((s) => marking.has(s.id));
+      if (bills.length !== marking.size) return fail("One of the bills wasn't found. Refresh and try again.");
+      const noInvoice = bills.find((s) => !s.invoiceNo);
+      if (noInvoice) return fail(`${noInvoice.saleNo} has no Raigam invoice number to check it against.`);
+      set((s) => ({ sales: s.sales.map((x) => (marking.has(x.id) ? { ...x, checked: checked === true } : x)) }));
+      return ok();
+    },
 
     // ---------- Payments ----------
     addPayment: (input) => {
@@ -1249,6 +1299,18 @@ export const createCore =
       if (next === payments) return fail("There are no open bills to link these payments to.");
       set({ payments: next });
       return ok(shopId);
+    },
+    markChequeCollected: (id, date) => {
+      const payment = get().payments.find((p) => p.id === id);
+      if (!payment) return fail("Payment not found.");
+      if (payment.method !== "Cheque") return fail(`${payment.receiptNo} isn't a cheque.`);
+      if (date !== "" && !isISODate(date)) return fail("Enter the date the cheque was collected.");
+      // Collected, it now pays its bills (any part over what's left becomes the store's advance)
+      set((s) => {
+        const payments = s.payments.map((p) => (p.id === id ? { ...p, chequeCollectedDate: date } : p));
+        return { payments: normalizeAllocations(s.shops, s.sales, payments) };
+      });
+      return ok(id);
     },
 
     // ---------- Expenses ----------
@@ -1309,6 +1371,111 @@ export const createCore =
       // Its items are back in the return items store, waiting to be sent
       set((s) => ({ raigamReturns: s.raigamReturns.filter((r) => r.id !== id) }));
       return ok();
+    },
+
+    // ---------- Sync from Raigam ----------
+    syncRaigamBills: (bills, itemPicks) => {
+      if (!Array.isArray(bills) || !itemPicks || typeof itemPicks !== "object") return fail("Nothing to sync.");
+      const notes: string[] = [];
+      const valid = bills.filter(isRaigamBill);
+      if (valid.length < bills.length) notes.push(`${bills.length - valid.length} bill(s) from Raigam couldn't be read.`);
+
+      // Item matches picked in the sync dialog are remembered (a new pick replaces the old match)
+      const codes = new Set(get().items.map((i) => i.sapCode));
+      let links = get().raigamLinks;
+      for (const [raigamId, sapCode] of Object.entries(itemPicks)) {
+        if (Number.isInteger(Number(raigamId)) && codes.has(sapCode)) links = putLink(links, "Item", Number(raigamId), sapCode);
+      }
+      set({ raigamLinks: links });
+
+      const plan = planRaigamSync(get(), valid, {});
+      const saving = plan.rows.filter((r) => r.action === "add" || r.action === "update");
+
+      // Stores: links learned from bills already here or the same name; new outlets get a store
+      // (and route) with just the name, but only if a bill is going on it
+      const wanted = new Set(saving.map((r) => r.bill.outletId));
+      const shopOf = new Map<number, string>();
+      const routeAdded = new Map<number, string>();
+      for (const [outletId, ref] of plan.stores) {
+        if (!("name" in ref)) {
+          if (ref.learnt) links = putLink(links, "Store", outletId, ref.shopId);
+          shopOf.set(outletId, ref.shopId);
+          continue;
+        }
+        if (!wanted.has(outletId)) continue;
+        let routeId = ref.routeId || routeAdded.get(ref.raigamRouteId) || "";
+        if (!routeId) {
+          const route = get().addRoute({
+            routeCode: nextCode(get().routes.map((r) => r.routeCode), "RT", 3),
+            routeName: ref.routeName || "Raigam route",
+            area: "",
+            visitDays: [],
+            salesRep: "",
+            vehicleNumber: "",
+            active: true,
+          });
+          if (!route.ok) {
+            notes.push(`${ref.name}: ${route.error}`);
+            continue;
+          }
+          routeId = route.id!;
+          routeAdded.set(ref.raigamRouteId, routeId);
+          links = putLink(links, "Route", ref.raigamRouteId, routeId);
+        }
+        const shop = get().addShop({
+          shopCode: nextCode(get().shops.map((s) => s.shopCode), "ST", 4),
+          shopName: ref.name,
+          ownerName: "",
+          phone: "",
+          address: "",
+          town: "",
+          mapLink: "",
+          routeId,
+          creditLimit: 0,
+          creditDays: NEW_STORE_CREDIT_DAYS,
+          openingBalance: 0,
+          active: true,
+          notes: "",
+        });
+        if (!shop.ok) {
+          notes.push(`${ref.name}: ${shop.error}`);
+          continue;
+        }
+        shopOf.set(outletId, shop.id!);
+        links = putLink(links, "Store", outletId, shop.id!);
+      }
+      set({ raigamLinks: links });
+
+      // Bills, through the same actions (and checks) as by hand.
+      // A bill whose contents changed on Raigam has to be checked against its new printout again.
+      const recheck = new Set<string>();
+      for (const row of saving) {
+        const no = row.bill.invoiceNo;
+        const done = (r: Result) => {
+          if (!r.ok) notes.push(`${no}: ${r.error}`);
+          return r.ok;
+        };
+        if (row.cancel) {
+          done(get().cancelSale(row.sale!.id));
+          continue;
+        }
+        let id = row.sale?.id;
+        if (row.input) {
+          const shopId = shopOf.get(row.bill.outletId);
+          if (!shopId) {
+            notes.push(`${no}: its store couldn't be added.`);
+            continue;
+          }
+          const input = { ...row.input, shopId };
+          const r = id ? get().updateSale(id, input) : get().createSale(input);
+          if (!done(r)) continue;
+          if (id) recheck.add(id);
+          id = r.ok ? r.id : id;
+        }
+        if (row.late && id) done(get().markLate(id));
+      }
+      if (recheck.size) set((s) => ({ sales: s.sales.map((x) => (recheck.has(x.id) ? { ...x, checked: false } : x)) }));
+      return { ok: true, notes };
     },
 
 

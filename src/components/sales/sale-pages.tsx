@@ -7,7 +7,7 @@ import { useResetKey } from "@/lib/use-dialog";
 import { SaleForm } from "./sale-form";
 
 export function SaleNotFound() {
-  return <NotFoundState title="Order not found" href="/sales" linkLabel="Back to store orders" />;
+  return <NotFoundState title="Order not found" href="/invoices" linkLabel="Back to Daily Invoices" />;
 }
 
 /** /sales/new — optional ?store=<id> preselects the store */
@@ -19,13 +19,13 @@ export function NewSale() {
 
   return (
     <>
-      <BackLink href={storeId ? `/stores/${storeId}` : "/sales"}>{storeId ? "Store" : "Store Orders"}</BackLink>
+      <BackLink href={storeId ? `/stores/${storeId}` : "/invoices"}>{storeId ? "Store" : "Daily Invoices"}</BackLink>
       <PageHeader title="New store order" description="The bill the rep writes. Items are delivered and cash collected later." />
       <SaleForm
         key={`${key}-${storeId}`}
         sale={null}
         defaultShopId={storeId}
-        cancelHref={storeId ? `/stores/${storeId}` : "/sales"}
+        cancelHref={storeId ? `/stores/${storeId}` : "/invoices"}
         onSaved={(id) => {
           reset();
           router.push(`/sales/${id}`);

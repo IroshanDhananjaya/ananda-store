@@ -1,0 +1,1 @@
+ALTER TABLE "sales" ADD COLUMN "extra_credit" numeric(12, 2) DEFAULT 0 NOT NULL;

@@ -7,6 +7,7 @@ import { DueDateLabel, OrderStatusBadge } from "@/components/ui/badge";
 import { buttonClass } from "@/components/ui/button";
 import { Card, CardHeader, PageHeader } from "@/components/ui/layout";
 import { EmptyRow, Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
+import { isPaid } from "@/lib/ledger";
 import { profitFor } from "@/lib/profit";
 import { LowStockCard } from "./low-stock-card";
 import { useAppStore, useItemMap, useOrderMap, useSaleDues, useShopBalances, useShopMap } from "@/lib/store";
@@ -87,7 +88,8 @@ export function DashboardPage() {
   const outstanding = shops.reduce((sum, s) => sum + (balances.get(s.id)?.balance ?? 0), 0);
   const owingCount = shops.filter((s) => (balances.get(s.id)?.balance ?? 0) > 0).length;
   const dues = useSaleDues();
-  const monthCollected = payments.filter((p) => p.date >= monthStart).reduce((sum, p) => sum + p.amount, 0);
+  // Cheques still to collect from the store aren't collected money yet
+  const monthCollected = payments.filter((p) => isPaid(p) && p.date >= monthStart).reduce((sum, p) => sum + p.amount, 0);
   const overdueTotal = shops.reduce((sum, s) => sum + (balances.get(s.id)?.overdue ?? 0), 0);
   const overdueBills = sales.filter((s) => (dues.get(s.id)?.overdueDays ?? 0) > 0).length;
   const expenses = useAppStore((s) => s.expenses);
@@ -116,7 +118,7 @@ export function DashboardPage() {
         description={new Date().toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
         actions={
           <>
-            <Link href="/sales?load=1" className={buttonClass("outline")}>
+            <Link href="/invoices?load=1" className={buttonClass("outline")}>
               <Truck /> Load lorry
             </Link>
             <Link href="/sales/new" className={buttonClass()}>
@@ -141,7 +143,7 @@ export function DashboardPage() {
           value={<span className="text-2xl">{formatMoney(overdueTotal)}</span>}
           sub={`${overdueBills} bill${overdueBills === 1 ? "" : "s"} past the end date`}
           icon={<ShieldAlert />}
-          href="/sales?filter=overdue"
+          href="/invoices?filter=overdue"
           tone="red"
         />
         <StatCard
@@ -167,7 +169,7 @@ export function DashboardPage() {
           <CardHeader
             title="Bills to collect"
             description="Delivered bills with a cash balance, soonest end date first."
-            actions={<CardLink href="/sales?filter=due">All bills</CardLink>}
+            actions={<CardLink href="/invoices?filter=due">All bills</CardLink>}
           />
           <Table>
             <THead>

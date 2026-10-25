@@ -1,0 +1,1 @@
+ALTER TABLE "sales" ADD COLUMN "checked" boolean DEFAULT false NOT NULL;

@@ -5,6 +5,7 @@ import { useMemo, useState, type FormEvent } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Field, Input, ReadOnlyValue, Select, toNumber } from "@/components/ui/form";
+import { ChequeStatusField } from "./cheque-status-field";
 import { FilterTabs } from "@/components/ui/layout";
 import { Modal } from "@/components/ui/modal";
 import { StackBox } from "@/components/ui/table";
@@ -20,6 +21,8 @@ type Values = {
   method: PaymentMethod;
   chequeNumber: string;
   chequeDate: string;
+  /** "" = still to collect */
+  chequeCollectedDate: string;
   reference: string;
 };
 
@@ -63,6 +66,7 @@ function PaymentForm({
       method: payment?.method ?? "Cash",
       chequeNumber: payment?.chequeNumber ?? "",
       chequeDate: payment?.chequeDate ?? "",
+      chequeCollectedDate: payment?.chequeCollectedDate ?? "",
       reference: payment?.reference ?? "",
     };
   });
@@ -110,7 +114,7 @@ function PaymentForm({
     if (!values.shopId) next.shopId = "Select a store.";
     if (!values.date) next.date = "Select a date.";
     if (!(toNumber(values.amount) > 0)) next.amount = "Enter an amount above 0.";
-    if (values.method === "Cheque" && !values.chequeNumber.trim()) next.chequeNumber = "Cheque number is required.";
+    if (values.method === "Cheque" && values.chequeCollectedDate && !values.chequeNumber.trim()) next.chequeNumber = "Enter the number of the collected cheque.";
     const over = bills.find((b) => toNumber(allocs[b.id] ?? "") > b.due + 0.004 || toNumber(allocs[b.id] ?? "") < 0);
     if (over) next.allocs = `${over.ref} only has ${formatMoney(over.due)} to collect.`;
     else if (unlinked < -0.004) next.allocs = "The bill amounts add up to more than the payment.";
@@ -266,20 +270,28 @@ function PaymentForm({
       </Field>
       {values.method === "Cheque" && (
         <>
-          <Field label="Cheque Number" htmlFor="chqNo" required error={errors.chequeNumber}>
+          <Field label="Cheque Number" htmlFor="chqNo" required={!!values.chequeCollectedDate} error={errors.chequeNumber}>
             <Input id="chqNo" value={values.chequeNumber} onChange={set("chequeNumber")} inputMode="numeric" aria-invalid={!!errors.chequeNumber} />
           </Field>
           <Field label="Cheque Date" htmlFor="chqDate" hint="Date the cheque can be deposited">
             <Input id="chqDate" type="date" value={values.chequeDate} onChange={set("chequeDate")} />
           </Field>
+          <ChequeStatusField
+            collectedDate={values.chequeCollectedDate}
+            onChange={(chequeCollectedDate) => setValues((v) => ({ ...v, chequeCollectedDate }))}
+            receivedDate={values.date}
+            className="sm:col-span-2"
+          />
         </>
       )}
-      <Field label="Reference / Notes" htmlFor="payRef" className="sm:col-span-2">
+      <Field label={values.method === "Bank Transfer" ? "Transfer reference" : "Note"} htmlFor="payRef" className="sm:col-span-2">
         <Input
           id="payRef"
           value={values.reference}
           onChange={set("reference")}
-          placeholder={values.method === "Bank Transfer" ? "Bank and transfer reference" : "Optional"}
+          placeholder={
+            values.method === "Bank Transfer" ? "Bank and transfer reference" : values.method === "Cheque" ? "Bank, branch, who gave it… (optional)" : "Optional"
+          }
         />
       </Field>
     </form>

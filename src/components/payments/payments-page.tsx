@@ -15,7 +15,8 @@ import { useAppStore, useRouteMap, useShopMap } from "@/lib/store";
 import { OPENING_BILL, PAYMENT_METHODS, type Payment, type PaymentMethod } from "@/lib/types";
 import { useDialog } from "@/lib/use-dialog";
 import { formatDate, formatMoney, includesText } from "@/lib/utils";
-import { unlinkedAmount } from "@/lib/ledger";
+import { isPaid, unlinkedAmount } from "@/lib/ledger";
+import { ChequeStatusBadge } from "./cheque-status-field";
 import { PaymentFormDialog } from "./payment-form-dialog";
 
 type Filter = "all" | PaymentMethod;
@@ -44,7 +45,9 @@ export function PaymentsPage() {
       return includesText([p.receiptNo, p.chequeNumber, p.reference, shop?.shopName, shop?.shopCode, ...bills], query);
     })
     .sort((a, b) => b.date.localeCompare(a.date) || b.receiptNo.localeCompare(a.receiptNo));
-  const total = rows.reduce((sum, p) => sum + p.amount, 0);
+  // Cheques still to collect from the store are listed, but not collected money yet
+  const total = rows.filter(isPaid).reduce((sum, p) => sum + p.amount, 0);
+  const pending = rows.filter((p) => !isPaid(p)).reduce((sum, p) => sum + p.amount, 0);
 
   const pager = usePagination(rows, [query, routeId, method]);
 
@@ -128,6 +131,9 @@ export function PaymentsPage() {
                       <>
                         {p.chequeNumber}
                         <span className="block text-xs text-slate-500">{formatDate(p.chequeDate)}</span>
+                        <span className="mt-1 block">
+                          <ChequeStatusBadge payment={p} />
+                        </span>
                       </>
                     ) : (
                       <span className="text-slate-400">—</span>
@@ -177,6 +183,7 @@ export function PaymentsPage() {
         </Table>
         <TableFooter pager={<Pagination pager={pager} />}>
           {rows.length} payments · <span className="font-medium text-slate-700">{formatMoney(total)}</span> collected
+          {pending > 0 && ` · ${formatMoney(pending)} in cheques still to collect`}
         </TableFooter>
       </Card>
 

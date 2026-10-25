@@ -10,15 +10,18 @@ import { Field, Input, ReadOnlyValue, toNumber } from "@/components/ui/form";
 import { SearchSelect } from "@/components/ui/search-select";
 import { Card, CardHeader } from "@/components/ui/layout";
 import { EmptyRow, Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
-import { billDiscount, itemsTotal, lineValue, returnsTotal, saleSubtotal, saleTotal, stockIsOut } from "@/lib/ledger";
+import { amountOwed, billDiscount, itemsTotal, lineValue, returnsTotal, saleSubtotal, saleTotal, stockIsOut } from "@/lib/ledger";
 import { useAppStore, useItemMap, useRouteMap, useSaleDues, useShopBalances } from "@/lib/store";
 import type { Sale, SaleInput, Shop } from "@/lib/types";
 import { addDays, cn, formatDate, formatMoney, formatQty, newId, nextCode, round2, todayISO } from "@/lib/utils";
 import { AddPaymentButton, BillPaymentDialog, BillPaymentList, type BillPaymentRow } from "./bill-payment-dialog";
 import { blankReturn, pricedReturn, ReturnPanel, returnsInput, returnStarted, ReturnTable, toReturnDrafts, type ReturnDraft } from "./return-items";
 
-/** One bill line while editing; cancelQty only comes from a delivered bill (entered at delivery, not here) */
-type LineDraft = { key: string; stockKey: string; qty: string; freeQty: string; unitPrice: string; discountPct: string; cancelQty: number };
+/**
+ * One bill line while editing; cancelQty only comes from a delivered bill (entered at delivery, not here),
+ * takenOff only from Raigam (synced: booked there but taken off the bill; qty may then be 0)
+ */
+type LineDraft = { key: string; stockKey: string; qty: string; freeQty: string; unitPrice: string; discountPct: string; cancelQty: number; takenOff: number };
 type DraftErrors = Partial<Record<"stockKey" | "qty" | "freeQty" | "unitPrice" | "discountPct", string>>;
 
 const stockKeyOf = (sapCode: string, locationNumber: string) => `${sapCode}|${locationNumber}`;
@@ -26,7 +29,7 @@ const splitKey = (key: string) => {
   const [sapCode = "", locationNumber = ""] = key.split("|");
   return { sapCode, locationNumber };
 };
-const emptyDraft = (): LineDraft => ({ key: newId(), stockKey: "", qty: "", freeQty: "0", unitPrice: "", discountPct: "0", cancelQty: 0 });
+const emptyDraft = (): LineDraft => ({ key: newId(), stockKey: "", qty: "", freeQty: "0", unitPrice: "", discountPct: "0", cancelQty: 0, takenOff: 0 });
 const isWhole = (v: string) => v !== "" && Number.isInteger(Number(v)) && Number(v) >= 0;
 /** A line as numbers, for the bill maths in ledger.ts */
 const priced = (l: LineDraft) => ({ qty: toNumber(l.qty), unitPrice: toNumber(l.unitPrice), discountPct: toNumber(l.discountPct), cancelQty: l.cancelQty });
@@ -84,6 +87,7 @@ export function SaleForm({
       unitPrice: String(l.unitPrice),
       discountPct: String(l.discountPct),
       cancelQty: l.cancelQty,
+      takenOff: l.takenOff,
     })),
   );
   const [draft, setDraft] = useState<LineDraft>(emptyDraft);
@@ -137,7 +141,7 @@ export function SaleForm({
 
   // Store balance without this order (when editing a delivered one) so it isn't counted twice
   const balanceBefore = shop
-    ? round2((balances.get(shop.id)?.balance ?? 0) - (sale && delivered && sale.shopId === shop.id ? saleTotal(sale) : 0))
+    ? round2((balances.get(shop.id)?.balance ?? 0) - (sale && delivered && sale.shopId === shop.id ? amountOwed(sale) : 0))
     : 0;
   // Payments already on this bill (editing) or added to the new bill here
   const savedPayments: BillPaymentRow[] = (savedDue?.payments ?? []).map((p) => {
@@ -150,6 +154,7 @@ export function SaleForm({
       method: payment?.method ?? "Cash",
       chequeNumber: payment?.chequeNumber ?? "",
       chequeDate: payment?.chequeDate ?? "",
+      chequeCollectedDate: payment?.chequeCollectedDate ?? "",
       reference: payment?.reference ?? "",
       ofReceipt: payment?.amount,
     };
@@ -205,7 +210,7 @@ export function SaleForm({
     if (!sapCode) e.stockKey = "Pick an item.";
     else if (!locationNumber) e.stockKey = "This item has no stock location yet. Set it on the Items page.";
     else if (lines.some((l) => splitKey(l.stockKey).sapCode === sapCode && l.key !== d.key)) e.stockKey = "Already on the bill below. Edit it there.";
-    if (!isWhole(d.qty) || toNumber(d.qty) === 0) e.qty = "A whole number above 0.";
+    if (!isWhole(d.qty) || (toNumber(d.qty) === 0 && !d.takenOff)) e.qty = "A whole number above 0.";
     else if (d.cancelQty > toNumber(d.qty)) e.qty = `${d.cancelQty} were cancelled at delivery, so at least ${d.cancelQty}.`;
     if (!isWhole(d.freeQty)) e.freeQty = "A whole number, 0 or more.";
     if (d.unitPrice === "" || toNumber(d.unitPrice) < 0) e.unitPrice = "Enter the price.";
@@ -289,6 +294,7 @@ export function SaleForm({
         ...splitKey(l.stockKey),
         qty: Number(l.qty),
         freeQty: Number(l.freeQty),
+        takenOff: l.takenOff,
         unitPrice: toNumber(l.unitPrice),
         discountPct: toNumber(l.discountPct),
       })),
@@ -298,7 +304,15 @@ export function SaleForm({
       ? updateSale(sale.id, input)
       : createSale(
           input,
-          paidWithOrder.map((p) => ({ date: p.date, amount: p.amount, method: p.method, chequeNumber: p.chequeNumber, chequeDate: p.chequeDate, reference: p.reference })),
+          paidWithOrder.map((p) => ({
+            date: p.date,
+            amount: p.amount,
+            method: p.method,
+            chequeNumber: p.chequeNumber,
+            chequeDate: p.chequeDate,
+            chequeCollectedDate: p.chequeCollectedDate,
+            reference: p.reference,
+          })),
         ));
     if (!result.ok) {
       toast.error(result.error);
@@ -597,6 +611,7 @@ export function SaleForm({
                       <span className="block font-mono text-xs text-slate-500">
                         {sapCode} · {locationNumber}
                       </span>
+                      {l.takenOff > 0 && <span className="block text-xs font-medium text-amber-700">{formatQty(l.takenOff)} taken off on Raigam</span>}
                     </TD>
                     <TD className={cn("text-right tabular-nums", short ? "font-medium text-amber-700" : "text-slate-500")}>
                       {formatQty(available.get(l.stockKey) ?? 0)}

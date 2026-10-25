@@ -57,7 +57,8 @@ export function DeliveryChanges({ sale, value, onChange }: { sale: Sale; value: 
           everything was taken.
         </p>
         <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
-          {sale.lines.map((l) => (
+          {/* Items taken off the bill on Raigam weren't delivered, so there's nothing to cancel */}
+          {sale.lines.filter((l) => l.qty > 0).map((l) => (
             <li key={l.id} className="flex items-center gap-3 px-3 py-2">
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium text-slate-900">{itemMap.get(l.sapCode)?.description ?? l.sapCode}</p>

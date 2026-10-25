@@ -155,6 +155,12 @@ export const sales = pgTable(
     deliveredDate: date({ mode: "string" }),
     dueDate: date({ mode: "string" }).notNull(),
     notes: text().notNull().default(""),
+    /** Ticked once compared with Raigam's printed bill */
+    checked: boolean().notNull().default(false),
+    /** Written when delivering: what happened at the store, when the store will pay a balance on credit */
+    deliveryNote: text().notNull().default(""),
+    /** Credit amount added at delivery on top of the invoice value (owed with the bill, not a sale) */
+    extraCredit: money().notNull().default(0),
   },
   (t) => [check("sales_status", sql`${t.status} in ('Ordered', 'Loaded', 'Delivered', 'Cancelled')`), noApiAccess()],
 ).enableRLS();
@@ -179,6 +185,8 @@ export const saleLines = pgTable(
     unitPrice: money().notNull(),
     discountPct: numeric({ precision: 5, scale: 2, mode: "number" }).notNull().default(0),
     cancelQty: integer().notNull().default(0),
+    /** Taken off the bill on Raigam before delivery (qty is what's left) */
+    takenOff: integer().notNull().default(0),
     costPrice: money().notNull(),
   },
   (t) => [unique().on(t.saleId, t.kind, t.sapCode, t.locationNumber), noApiAccess()],
@@ -196,6 +204,8 @@ export const payments = pgTable("payments", {
   method: text({ enum: ["Cash", "Cheque", "Bank Transfer"] }).notNull(),
   chequeNumber: text().notNull().default(""),
   chequeDate: date({ mode: "string" }),
+  /** Cheques: when it was collected from the store (in hand); NULL = still to collect */
+  chequeCollectedDate: date({ mode: "string" }),
   reference: text().notNull().default(""),
 }, () => [noApiAccess()]).enableRLS();
 
@@ -238,6 +248,22 @@ export const raigamReturnLines = pgTable(
     qty: integer().notNull(),
   },
   (t) => [primaryKey({ columns: [t.returnId, t.position] }), check("raigam_return_lines_qty", sql`${t.qty} > 0`), noApiAccess()],
+).enableRLS();
+
+/**
+ * What a Raigam SFA id stands for here, learned by Sync from Raigam: Item → SAP code,
+ * Store → shop id, Route → route id. No foreign key: a link to something deleted is just ignored.
+ */
+export const raigamLinks = pgTable(
+  "raigam_links",
+  {
+    id: text().primaryKey(),
+    seq: seq(),
+    kind: text({ enum: ["Item", "Store", "Route"] }).notNull(),
+    raigamId: integer().notNull(),
+    appId: text().notNull(),
+  },
+  (t) => [unique().on(t.kind, t.raigamId), check("raigam_links_kind", sql`${t.kind} in ('Item', 'Store', 'Route')`), noApiAccess()],
 ).enableRLS();
 
 export const expenses = pgTable("expenses", {

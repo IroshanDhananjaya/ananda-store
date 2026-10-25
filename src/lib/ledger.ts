@@ -2,7 +2,7 @@ import { OPENING_BILL, type BillStatus, type Payment, type PaymentAllocation, ty
 import { daysUntil, round2 } from "./utils";
 
 // Cash balance = money we still need to get from a store:
-//   opening balance + delivered order totals − payments
+//   opening balance + delivered order totals (+ any credit amount added at delivery) − payments (a cheque counts once collected)
 //
 // Orders still waiting for delivery are not owed yet. Every collection (at
 // delivery or later) is a Payment linked to bills (delivered orders, or the
@@ -10,6 +10,8 @@ import { daysUntil, round2 } from "./utils";
 // and end date for collecting it.
 
 export const isDelivered = (sale: Pick<Sale, "status">) => sale.status === "Delivered";
+/** Money the store has paid: a cheque still to collect from the store isn't paid until it's collected */
+export const isPaid = (p: Pick<Payment, "method" | "chequeCollectedDate">) => p.method !== "Cheque" || !!p.chequeCollectedDate;
 /** Loaded or delivered: the bill's items have left the warehouse */
 export const stockIsOut = (sale: Pick<Sale, "status">) => sale.status === "Loaded" || sale.status === "Delivered";
 
@@ -37,6 +39,13 @@ export function lineValue(l: PricedLine) {
   return round2((l.qty - (l.cancelQty ?? 0)) * l.unitPrice * (1 - (l.discountPct ?? 0) / 100));
 }
 
+/** Bill price per unit less the item's wholesale price; 0 when the same (or no wholesale price is set to compare with) */
+export function wholesaleDifference(unitPrice: number, wholesalePrice: number | undefined) {
+  if (!wholesalePrice || wholesalePrice <= 0) return 0;
+  const diff = round2(unitPrice - wholesalePrice);
+  return Math.abs(diff) >= 0.01 ? diff : 0;
+}
+
 export function itemsTotal(sale: PricedLines) {
   return round2(sale.lines.reduce((sum, l) => sum + lineValue(l), 0));
 }
@@ -60,6 +69,11 @@ export function saleTotal(sale: PricedLines & { discount: number }) {
   return round2(saleSubtotal(sale) - sale.discount);
 }
 
+/** What's collected on a bill: its invoice value plus any credit amount added at delivery (not a sale) */
+export function amountOwed(sale: Pick<Sale, "lines" | "returns" | "discount" | "extraCredit">) {
+  return round2(saleTotal(sale) + (sale.extraCredit ?? 0));
+}
+
 
 export function linkedAmount(payment: Pick<Payment, "allocations">) {
   return round2(payment.allocations.reduce((sum, a) => sum + a.amount, 0));
@@ -81,7 +95,10 @@ const paymentOrder = (a: Payment, b: Payment) => a.date.localeCompare(b.date) ||
 // ---------- Per-sale cash balance ----------
 
 export type SaleDue = {
+  /** Invoice value */
   total: number;
+  /** Credit amount added at delivery: collected with the bill, not part of its invoice value */
+  extraCredit: number;
   /** Paid through payments linked to this bill (before delivery too: paid in advance) */
   paid: number;
   /** Cash balance still to collect for this order (0 until delivered) */
@@ -92,7 +109,8 @@ export type SaleDue = {
   dueDate: string;
   /** Days past the end date for collecting */
   overdueDays: number;
-  payments: { paymentId: string; receiptNo: string; date: string; amount: number }[];
+  /** Payments linked to the bill; `pending` = a cheque still to collect (listed, not counted as paid) */
+  payments: { paymentId: string; receiptNo: string; date: string; amount: number; pending: boolean }[];
 };
 
 export function computeSaleDues(sales: Sale[], payments: Payment[]) {
@@ -101,27 +119,29 @@ export function computeSaleDues(sales: Sale[], payments: Payment[]) {
     for (const a of p.allocations) {
       if (a.saleId === OPENING_BILL) continue;
       const list = linked.get(a.saleId) ?? [];
-      list.push({ paymentId: p.id, receiptNo: p.receiptNo, date: p.date, amount: a.amount });
+      list.push({ paymentId: p.id, receiptNo: p.receiptNo, date: p.date, amount: a.amount, pending: !isPaid(p) });
       linked.set(a.saleId, list);
     }
   }
   const map = new Map<string, SaleDue>();
   for (const s of sales) {
     const total = saleTotal(s);
+    const extraCredit = s.extraCredit ?? 0;
     const list = (linked.get(s.id) ?? []).sort((a, b) => a.date.localeCompare(b.date));
-    const paid = round2(list.reduce((sum, x) => sum + x.amount, 0));
+    const paid = round2(list.filter((x) => !x.pending).reduce((sum, x) => sum + x.amount, 0));
     if (!isDelivered(s)) {
       // Not owed until delivered; anything paid so far was paid in advance
-      map.set(s.id, { total, paid, due: 0, delivered: false, status: s.status === "Delivered" ? "Ordered" : s.status, dueDate: s.dueDate, overdueDays: 0, payments: list });
+      map.set(s.id, { total, extraCredit, paid, due: 0, delivered: false, status: s.status === "Delivered" ? "Ordered" : s.status, dueDate: s.dueDate, overdueDays: 0, payments: list });
       continue;
     }
-    const due = round2(total - paid);
+    const due = round2(total + extraCredit - paid);
     map.set(s.id, {
       total,
+      extraCredit,
       paid,
       due,
       delivered: true,
-      status: billStatus(total, due),
+      status: billStatus(total + extraCredit, due),
       dueDate: s.dueDate,
       overdueDays: overdueDays(s.dueDate, due),
       payments: list,
@@ -150,7 +170,7 @@ export type OpenBill = {
 export function openBills(shop: Shop, sales: Sale[], payments: Payment[]): OpenBill[] {
   const allocated = new Map<string, number>();
   for (const p of payments) {
-    if (p.shopId !== shop.id) continue;
+    if (p.shopId !== shop.id || !isPaid(p)) continue;
     for (const a of p.allocations) allocated.set(a.saleId, (allocated.get(a.saleId) ?? 0) + a.amount);
   }
   const bills: OpenBill[] = [];
@@ -160,7 +180,7 @@ export function openBills(shop: Shop, sales: Sale[], payments: Payment[]): OpenB
     bills.push({ id: OPENING_BILL, ref: "Opening balance", date: "", dueDate: "", total: shop.openingBalance, paid: openingPaid, due: openingDue, overdueDays: 0 });
   }
   for (const s of sales.filter((x) => x.shopId === shop.id && isDelivered(x)).sort(byDateThenNo)) {
-    const total = saleTotal(s);
+    const total = amountOwed(s);
     const paid = round2(allocated.get(s.id) ?? 0);
     const due = round2(total - paid);
     if (due > EPS) {
@@ -175,12 +195,12 @@ export function openBills(shop: Shop, sales: Sale[], payments: Payment[]): OpenB
 export function payableBills(shop: Shop, sales: Sale[], payments: Payment[]): { id: string; ref: string; left: number }[] {
   const allocated = new Map<string, number>();
   for (const p of payments) {
-    if (p.shopId !== shop.id) continue;
+    if (p.shopId !== shop.id || !isPaid(p)) continue;
     for (const a of p.allocations) allocated.set(a.saleId, (allocated.get(a.saleId) ?? 0) + a.amount);
   }
   const waiting = sales
     .filter((s) => s.shopId === shop.id && (s.status === "Ordered" || s.status === "Loaded"))
-    .map((s) => ({ id: s.id, ref: s.saleNo, left: round2(saleTotal(s) - (allocated.get(s.id) ?? 0)) }))
+    .map((s) => ({ id: s.id, ref: s.saleNo, left: round2(amountOwed(s) - (allocated.get(s.id) ?? 0)) }))
     .filter((b) => b.left > EPS);
   return [...openBills(shop, sales, payments).map((b) => ({ id: b.id, ref: b.ref, left: b.due })), ...waiting];
 }
@@ -236,7 +256,8 @@ export function normalizeAllocations(shops: Shop[], sales: Sale[], payments: Pay
   const used = new Map<string, number>();
   const fixed = new Map<string, PaymentAllocation[]>();
 
-  for (const p of [...payments].sort(paymentOrder)) {
+  // Money already paid goes first; cheques still to collect get what's left of each bill
+  for (const p of [...payments].sort((a, b) => Number(!isPaid(a)) - Number(!isPaid(b)) || paymentOrder(a, b))) {
     const keep: PaymentAllocation[] = [];
     for (const a of p.allocations) {
       let cap: number;
@@ -246,7 +267,7 @@ export function normalizeAllocations(shops: Shop[], sales: Sale[], payments: Pay
         const sale = saleMap.get(a.saleId);
         // Any bill of the store can be paid against (before delivery too), except a cancelled one
         if (!sale || sale.shopId !== p.shopId || sale.status === "Cancelled") continue;
-        cap = Math.max(0, saleTotal(sale));
+        cap = Math.max(0, amountOwed(sale));
       }
       const key = `${p.shopId}|${a.saleId}`;
       const amount = round2(Math.min(a.amount, cap - (used.get(key) ?? 0)));
@@ -269,7 +290,10 @@ export function normalizeAllocations(shops: Shop[], sales: Sale[], payments: Pay
 
 export type ShopBalance = {
   opening: number;
+  /** Delivered bills' invoice values */
   sales: number;
+  /** Credit amounts added on delivered bills (owed, not sales) */
+  extraCredit: number;
   /** All payments (collections) */
   paid: number;
   /** Cash balance: what we still need to get from the store */
@@ -294,6 +318,7 @@ export function computeBalances(shops: Shop[], sales: Sale[], payments: Payment[
     map.set(s.id, {
       opening: s.openingBalance,
       sales: 0,
+      extraCredit: 0,
       paid: 0,
       balance: s.openingBalance,
       unlinked: 0,
@@ -315,9 +340,10 @@ export function computeBalances(shops: Shop[], sales: Sale[], payments: Payment[
       continue;
     }
     b.sales += saleTotal(sale);
+    b.extraCredit += sale.extraCredit ?? 0;
     if (sale.deliveredDate > b.lastSaleDate) b.lastSaleDate = sale.deliveredDate;
   }
-  for (const p of payments) {
+  for (const p of payments.filter(isPaid)) {
     const b = map.get(p.shopId);
     if (!b) continue;
     b.paid += p.amount;
@@ -327,10 +353,11 @@ export function computeBalances(shops: Shop[], sales: Sale[], payments: Payment[
   for (const s of shops) {
     const b = map.get(s.id)!;
     b.sales = round2(b.sales);
+    b.extraCredit = round2(b.extraCredit);
     b.paid = round2(b.paid);
     b.unlinked = round2(b.unlinked);
     b.toDeliverValue = round2(b.toDeliverValue);
-    b.balance = round2(b.opening + b.sales - b.paid);
+    b.balance = round2(b.opening + b.sales + b.extraCredit - b.paid);
     const bills = openBills(s, sales, payments);
     b.openBills = bills.length;
     const late = bills.filter((x) => x.overdueDays > 0);
@@ -368,12 +395,15 @@ export function shopLedger(shop: Shop, sales: Sale[], payments: Payment[]): Ledg
       kind: "Sale",
       ref: s.saleNo,
       refId: s.id,
-      details: `Delivered ${s.lines.length} item${s.lines.length === 1 ? "" : "s"}, ${qty} units`,
-      debit: saleTotal(s),
+      details:
+        `Delivered ${s.lines.length} item${s.lines.length === 1 ? "" : "s"}, ${qty} units` +
+        (s.extraCredit ? ` · invoice ${saleTotal(s).toFixed(2)} + credit added ${s.extraCredit.toFixed(2)}` : ""),
+      debit: amountOwed(s),
       credit: 0,
     });
   }
-  for (const p of payments.filter((x) => x.shopId === shop.id)) {
+  // A cheque still to collect isn't paid yet: it goes in once collected
+  for (const p of payments.filter((x) => x.shopId === shop.id && isPaid(x))) {
     const method = p.method === "Cheque" ? `Cheque ${p.chequeNumber}` : p.method;
     const forBills = p.allocations.map((a) => (a.saleId === OPENING_BILL ? "opening balance" : saleNo.get(a.saleId))).filter(Boolean);
     rows.push({

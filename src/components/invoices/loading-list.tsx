@@ -72,7 +72,8 @@ export function LoadingList({ sales, query }: { sales: Sale[]; query: string }) 
   const rows = useMemo(() => {
     const map = new Map<string, ItemTotal & { saleIds: Set<string> }>();
     for (const s of sales) {
-      for (const l of s.lines) {
+      // An item taken off the bill on Raigam (nothing left) isn't loaded
+      for (const l of s.lines.filter((x) => x.qty + x.freeQty > 0)) {
         const row =
           map.get(l.sapCode) ?? { sapCode: l.sapCode, bills: 0, booked: 0, free: 0, loaded: 0, toLoad: 0, value: 0, inStock: 0, saleIds: new Set() };
         row.saleIds.add(s.id);

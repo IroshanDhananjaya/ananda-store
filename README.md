@@ -90,6 +90,46 @@ Signed-out visitors are sent to `/login` (`src/proxy.ts`), and every server acti
 before it reads or saves anything, so the data stays private even if the proxy doesn't run. When the hosting
 site asks for environment variables, add `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY` as well as `DATABASE_URL`.
 
+### Sync from Raigam
+
+**Daily Invoices → Sync from Raigam** brings in the bills the reps booked on Raigam's SFA system
+(www.raigamsfa.com) for a date range. It signs in with the agency's own Raigam login, so add
+`RAIGAM_SFA_USERNAME` (the *User Name* on Raigam's sign-in page) and `RAIGAM_SFA_PASSWORD` to `.env.local`
+and to the hosting site's environment variables. They stay on the server.
+
+1. Pick the dates and **Check Raigam**. Nothing is saved yet: the dialog shows what would happen to each bill.
+2. **Match Raigam's items to yours** (only the first time an item turns up): items with the same name are
+   matched for you; pick the rest. The app remembers every match.
+3. **Save.** What happens to each bill:
+   - **New** on Raigam: added as *To load* (or *Late*), with the bill's invoice number. A store the app hasn't
+     seen gets a new store with just its name (and its route, if that's new too); fill in the rest on the Stores page.
+   - **Already here and not delivered yet**: updated to match Raigam (items, free issue, prices, returns, store,
+     date, discount); cancelled here if Raigam cancelled it, or marked late. A loaded bill's stock is adjusted.
+   - **Delivered or cancelled here**: left as it is (what happened at the store is recorded here).
+   - Cancelled on Raigam and never here: not added.
+
+A bill already here is found by its Raigam invoice number however it was typed (`CN00344538` = `CN000000000344538`),
+and its store tells the app which Raigam outlet that store is. Raigam's "cancelled qty" (items taken off a booked
+bill) is taken off the qty. A bill with only return items, or a line that's only free issue, can't be saved as a
+bill here; the dialog lists it under *Can't save yet*.
+
+The dialog shows Raigam's invoice count and value for each of its tabs (Booking / Actual / Late delivery /
+Cancelled) for the dates, the same figures as Raigam's invoice page; after saving, the same tab on Daily
+Invoices shows the app's. Items taken off a bill on Raigam (its "cancel qty") stay on the bill here as on Raigam's:
+the bill page shows *Booked* and *Taken off*, and only what's left is loaded and charged. A bill with every item
+taken off is kept at Rs. 0 (so the counts match) and flagged **All items taken off** in the bill lists.
+
+**Prices:** an item on a bill priced differently from its wholesale price (on the Items page) is shown on the bill
+page, under its unit price, with the difference and what it adds up to on the bill; Daily Invoices flags those
+bills (*N prices differ*).
+
+**Checked:** once a bill is compared with Raigam's printed bill, tick it in the *Checked* column of Daily Invoices
+(or on the bill page). *Not checked yet* lists the ones left, with a button to tick them all. A sync that changes a
+ticked bill's contents clears its tick, so it gets checked again.
+
+This uses Raigam's own (unpublished) API, the one its website uses, so it may stop working if Raigam changes
+their system; the dialog then shows the error and nothing is saved.
+
 ## Pages
 
 | Section | Page | What you can do |
@@ -97,9 +137,9 @@ site asks for environment variables, add `SUPABASE_URL` and `SUPABASE_PUBLISHABL
 | | Dashboard | **Priorities** (most urgent first: stock shortages, overdue bills, credit limits, loading, Raigam deliveries), cash balance due, overdue, net profit this month, collected this month, bills to collect, low stock (out / critical / low) |
 | Sales | Routes | Route number, name, area, visit days, sales rep, vehicle. Route page lists its stores with balances and overdue amounts |
 | Sales | Stores | Store number, name, owner, phone, address/town, map link, route, credit limit, **credit days**, opening balance, active. Store page: bills to collect, bills not delivered yet, full statement |
-| Sales | Store Orders | Bills the rep creates → **Load lorry** → **Deliver & collect** → follow up the balance by its end date. Printable |
-| Sales | Daily Invoices | Bills by day for a date range (Today / Yesterday / This week / This month / custom), filtered by route and store, by bill or delivered date, with day totals. **Loading list** tab: total qty per item across those bills (booked, loaded, still to load, in stock, value). Printable |
-| Sales | Payments | Every collection (at delivery or later): cash / cheque / bank transfer, and **which bills it paid** |
+| Sales | Daily Invoices | Every bill (store order): the rep creates it → **Load lorry** → **Deliver & collect** → follow up the balance by its end date (shown under the cash balance). Search by bill, Raigam invoice, store or rep; **Show** To load / On lorry / Has cash balance / Overdue / Paid / not checked with Raigam. Bills by day for a date range (Today / Yesterday / This week / This month / custom / **All dates**), filtered by route and store, by bill or delivered date, and like Raigam's invoice page by **Booking** (not delivered yet) / **Actual** (delivered) / **Late delivery** / **Cancelled** with its invoice count and total value, with day totals. **Checked** tick per bill (compared with Raigam's printed bill), with a *Not checked yet* filter. **Loading list** tab: total qty per item across those bills (booked, loaded, still to load, in stock, value). **Sync from Raigam** (see above). Printable |
+| Sales | Payments | Every collection (at delivery or later): cash / cheque / bank transfer, a note (bank, branch, reference), and **which bills it paid**. A cheque is **To collect** until you get it from the store (listed, but **not counted as paid**), then **Collected** (in hand, with the date) and it pays its bills |
+| Sales | Cheques & Credit | Credit and cheques are given for up to 21 days after delivery (the Deliver dialog warns past that) and flagged **5 days before** their date. Date range by delivered / received date, end / cheque date, or collected date. **Credit bills** (delivered bills not fully paid on their delivery day): Due in 5 days / Overdue / To collect / **Collected** (with the date) / All, with credit given, collected since, balance and delivery note. **Cheques** (soonest cheque date first): Due in 5 days (to bank, or still to collect) / To collect / **Collected** (in hand) / All, with *Mark collected* and *Undo* |
 | Accounts | Profit | Monthly and yearly sales, cost of items, gross profit, expenses and **net profit**; chart, month-by-month table, profit by item / route, expenses by category |
 | Accounts | Expenses | Fuel, lorry repairs, labour, salaries, rent, phone… (date, category, amount, how paid) |
 | Purchasing | Purchase Orders | *Order Details* sheet: orders placed with Raigam: create, receive, post to stock. **Receive new load**: enter a Raigam invoice (invoice no., PO no., delivery date, items with qty, price, discount, value, stock location, and the **Discount % for Total Invoice**) in one step: saved as a received order whose bill amount is the grand total after that discount, stock goes up, item cost prices become the net price per unit after both discounts. The same invoice number can't be entered twice |
@@ -112,13 +152,13 @@ site asks for environment variables, add `SUPABASE_URL` and `SUPABASE_PUBLISHABL
 
 | Step | Who / where | Status | Stock | Cash balance |
 | --- | --- | --- | --- | --- |
-| 1. **Create bill** | Rep: *Store Orders → New bill* (or *New bill* on a store) | To load | unchanged | unchanged |
-| 2. **Load lorry** | *Store Orders → Load lorry*: pick a route, tick bills, check the loading sheet, enter the vehicle | On lorry | **reduced** | unchanged |
-| 3. **Deliver & collect** | Bill page → *Deliver & collect cash*: enter the money collected and which bills it pays | Paid / Part paid / Unpaid | — | bill total added, collection taken off |
+| 1. **Create bill** | Rep: *Daily Invoices → New bill* (or *New bill* on a store), or *Sync from Raigam* | To load | unchanged | unchanged |
+| 2. **Load lorry** | *Daily Invoices → Load lorry*: pick a route, tick bills, check the loading sheet, enter the vehicle | On lorry | **reduced** | unchanged |
+| 3. **Deliver & collect** | Bill page → *Deliver & collect cash*: enter the money collected (Cash / Cheque / Bank Transfer) and which bills it pays (leave it empty for credit), a **credit amount to add** (money the store owes on top of this bill, e.g. old credit, even on a Rs. 0 bill: collected with the bill, not part of its invoice value, sales or profit), and a **delivery note** (anything about the delivery, or when / how they'll pay the balance) | Paid / Part paid / Unpaid | — | bill total added, collection taken off |
 | 4. **Collect the balance** | Bill page / store page → *Record payment* (or *Collect* on a bill) | Paid when fully collected | — | reduced |
 
 - Each bill has an **end date to collect the balance**: the bill date + the store's **credit days**, editable on the bill and
-  at delivery. After the end date the bill is **Overdue** (red), on the bill, store, route, Store Orders (*Overdue* filter) and dashboard.
+  at delivery. After the end date the bill is **Overdue** (red), on the bill, store, route, Daily Invoices (*Show: Overdue*) and dashboard.
 - **Money collected is always a payment receipt (RC-…) linked to bills.** At delivery it fills this bill first, then the store's
   oldest unpaid bills; you can change the split. Anything not for a bill is kept as an advance and can be applied later
   (*Use … advance* on the store page).
@@ -185,7 +225,8 @@ src/
   components/
     routes/  shops/       routes and stores (a store is called "Shop" in code)
     profit/  expenses/    profit report (with chart) and expenses
-    sales/  payments/     store orders (bills, load lorry, deliver) and collections
+    invoices/             Daily Invoices (the bill list), loading list, cash sheet, Sync from Raigam dialog
+    sales/  payments/     a bill's pages and dialogs (form, load lorry, deliver, Checked tick) and collections
     orders/               order list, form, detail page, receive / post-to-stock dialogs
     order-items/          order items page
     stock/  items/  locations/  dashboard/
@@ -200,7 +241,9 @@ src/
     types.ts              data model (mirrors the sheets)
     seed.ts               sample data
     core.ts               every action's rules and validation (runs on the server)
-    actions.ts            server actions: signIn, signOut, fetchAllData, runAction (each checks the login)
+    actions.ts            server actions: signIn, signOut, fetchAllData, runAction, readRaigamBills/Items (each checks the login)
+    raigam.ts             Sync from Raigam: what each Raigam bill means here (add / update / leave), item and store matching
+    raigam-sfa.ts         reads bills from Raigam's SFA system (RAIGAM_SFA_USERNAME, RAIGAM_SFA_PASSWORD; server only)
     supabase.ts           Supabase Auth client (SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY)
     store.ts              zustand store in the browser: a copy of the data; actions call the server
     ledger.ts             cash balance, per-bill balances, overdue, payment-to-bill links, statements

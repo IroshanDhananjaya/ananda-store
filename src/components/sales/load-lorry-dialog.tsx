@@ -39,7 +39,8 @@ function LoadForm({ preselect, onDone }: { preselect: string[]; onDone: () => vo
   const sheet = useMemo(() => {
     const map = new Map<string, { sapCode: string; locationNumber: string; qty: number }>();
     for (const s of chosen) {
-      for (const l of s.lines) {
+      // An item taken off the bill on Raigam (nothing left) isn't loaded
+      for (const l of s.lines.filter((x) => x.qty + x.freeQty > 0)) {
         const key = `${l.sapCode}|${l.locationNumber}`;
         const row = map.get(key) ?? { sapCode: l.sapCode, locationNumber: l.locationNumber, qty: 0 };
         // Free issue goes on the lorry too

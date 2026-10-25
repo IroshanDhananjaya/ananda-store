@@ -9,7 +9,7 @@ import { BackLink, Card, CardHeader, Detail, NotFoundState, PageHeader, SummaryT
 import { EmptyRow, RowActions, Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { PaymentFormDialog } from "@/components/payments/payment-form-dialog";
 import { ShopFormDialog } from "@/components/shops/shop-form-dialog";
-import { saleTotal } from "@/lib/ledger";
+import { isPaid, saleTotal } from "@/lib/ledger";
 import { useAppStore, useShopBalances } from "@/lib/store";
 import { useDialog } from "@/lib/use-dialog";
 import { cn, formatDate, formatMoney, monthStartISO } from "@/lib/utils";
@@ -38,7 +38,7 @@ export function RouteDetail({ id }: { id: string }) {
   const monthSales = sales
     .filter((s) => shopIds.has(s.shopId) && s.status === "Delivered" && s.deliveredDate >= monthStart)
     .reduce((sum, s) => sum + saleTotal(s), 0);
-  const monthCollected = payments.filter((p) => shopIds.has(p.shopId) && p.date >= monthStart).reduce((sum, p) => sum + p.amount, 0);
+  const monthCollected = payments.filter((p) => isPaid(p) && shopIds.has(p.shopId) && p.date >= monthStart).reduce((sum, p) => sum + p.amount, 0);
   const overdue = shops.reduce((sum, s) => sum + (balances.get(s.id)?.overdue ?? 0), 0);
   const overLimit = shops.filter((s) => (balances.get(s.id)?.balance ?? 0) > s.creditLimit).length;
 

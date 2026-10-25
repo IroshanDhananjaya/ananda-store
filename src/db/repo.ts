@@ -39,7 +39,7 @@ function columns<T extends Table>(table: T) {
 // ---------- Loading ----------
 
 export async function loadData(tx: Tx): Promise<Data> {
-  const [items, locations, stock, orders, orderItems, routes, shops, sales, lines, payments, allocations, expenses, raigamReturns, raigamReturnLines] = await Promise.all([
+  const [items, locations, stock, orders, orderItems, routes, shops, sales, lines, payments, allocations, expenses, raigamReturns, raigamReturnLines, raigamLinks] = await Promise.all([
     tx.select(columns(t.items)).from(t.items).orderBy(asc(t.items.seq)),
     tx.select(columns(t.locations)).from(t.locations).orderBy(asc(t.locations.seq)),
     tx.select(columns(t.stock)).from(t.stock).orderBy(asc(t.stock.seq)),
@@ -54,6 +54,7 @@ export async function loadData(tx: Tx): Promise<Data> {
     tx.select(columns(t.expenses)).from(t.expenses).orderBy(asc(t.expenses.seq)),
     tx.select(columns(t.raigamReturns)).from(t.raigamReturns).orderBy(asc(t.raigamReturns.seq)),
     tx.select().from(t.raigamReturnLines).orderBy(asc(t.raigamReturnLines.returnId), asc(t.raigamReturnLines.position)),
+    tx.select(columns(t.raigamLinks)).from(t.raigamLinks).orderBy(asc(t.raigamLinks.seq)),
   ]);
 
   const linesBySale = Map.groupBy(lines, (l) => l.saleId);
@@ -92,6 +93,7 @@ export async function loadData(tx: Tx): Promise<Data> {
             unitPrice: l.unitPrice,
             discountPct: l.discountPct,
             cancelQty: l.cancelQty,
+            takenOff: l.takenOff,
             costPrice: l.costPrice,
           })),
         returns: (linesBySale.get(r.id) ?? [])
@@ -110,6 +112,7 @@ export async function loadData(tx: Tx): Promise<Data> {
       (r): Payment => ({
         ...r,
         chequeDate: unblank(r.chequeDate),
+        chequeCollectedDate: unblank(r.chequeCollectedDate),
         allocations: (allocationsByPayment.get(r.id) ?? []).map((a) => ({ saleId: a.saleId ?? OPENING_BILL, amount: a.amount })),
       }),
     ),
@@ -118,6 +121,7 @@ export async function loadData(tx: Tx): Promise<Data> {
       ...r,
       lines: (linesByReturn.get(r.id) ?? []).map((l) => ({ kind: l.kind, sapCode: l.sapCode, qty: l.qty })),
     })),
+    raigamLinks,
   };
 }
 
@@ -173,13 +177,14 @@ const SPECS: TableSpec[] = [
           freeQty: 0,
           discountPct: 0,
           cancelQty: 0,
+          takenOff: 0,
           saleId: s.id,
           position: s.lines.length + i,
         })),
       ],
     },
   ),
-  spec("payments", t.payments, (r) => ({ ...omit(r, "allocations"), chequeDate: blank(r.chequeDate) }), {
+  spec("payments", t.payments, (r) => ({ ...omit(r, "allocations"), chequeDate: blank(r.chequeDate), chequeCollectedDate: blank(r.chequeCollectedDate) }), {
     table: t.paymentAllocations,
     parent: t.paymentAllocations.paymentId,
     rows: (p) =>
@@ -196,6 +201,7 @@ const SPECS: TableSpec[] = [
     parent: t.raigamReturnLines.returnId,
     rows: (r) => r.lines.map((l, position) => ({ ...l, returnId: r.id, position })),
   }),
+  spec("raigamLinks", t.raigamLinks, (r) => ({ ...r })),
 ];
 
 const fingerprint = (s: TableSpec, r: Rec) => JSON.stringify([s.toRow(r), s.children?.rows(r)]);

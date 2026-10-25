@@ -32,7 +32,7 @@ type Status = {
 export type AppStore = Data & AsyncActions & Status;
 
 /** The login has ended (signed out elsewhere, or removed in Supabase): sign in again, then come back here */
-function goToLogin() {
+export function goToLogin() {
   const here = window.location.pathname + window.location.search;
   window.location.replace(here === "/" ? "/login" : `/login?next=${encodeURIComponent(here)}`);
 }

@@ -142,6 +142,11 @@ export type SaleLine = {
   discountPct: number;
   /** Entered at delivery: booked qty the store didn't take (back into stock, not charged) */
   cancelQty: number;
+  /**
+   * Booked on Raigam but taken off the bill there before delivery (Raigam's "cancel qty"), shown as on
+   * Raigam's bill. Never loaded or charged: `qty` is what's left (0 when all of it was taken off).
+   */
+  takenOff: number;
   /** Item cost per unit when the bill was saved, so later price changes don't rewrite past profit */
   costPrice: number;
 };
@@ -224,6 +229,15 @@ export type Sale = {
   /** ISO end date for collecting the balance */
   dueDate: string;
   notes: string;
+  /** Ticked once compared with Raigam's printed bill; cleared when a sync brings a change from Raigam */
+  checked: boolean;
+  /** Written when delivering: what happened at the store, when the store will pay a balance on credit ("" = none) */
+  deliveryNote: string;
+  /**
+   * Credit amount added at delivery, on top of the invoice value (e.g. old credit to collect with this bill).
+   * Owed and collected with the bill, but not part of its invoice value, sales or profit.
+   */
+  extraCredit: number;
 };
 
 export const PAYMENT_METHODS = ["Cash", "Cheque", "Bank Transfer"] as const;
@@ -252,6 +266,9 @@ export type Payment = {
   chequeNumber: string;
   /** ISO date the cheque can be banked */
   chequeDate: string;
+  /** Cheques only: ISO date the cheque was collected from the store (in hand); "" = still to collect */
+  chequeCollectedDate: string;
+  /** Note: bank / branch for a cheque, transfer reference, … */
   reference: string;
   /** Which bills this payment pays. Any amount left over is unlinked credit (an advance). */
   allocations: PaymentAllocation[];
@@ -284,10 +301,24 @@ export type Expense = {
   method: PaymentMethod;
 };
 
+export const RAIGAM_LINK_KINDS = ["Item", "Store", "Route"] as const;
+export type RaigamLinkKind = (typeof RAIGAM_LINK_KINDS)[number];
+
+/** What a Raigam SFA id stands for here (learned by Sync from Raigam, see src/lib/raigam.ts) */
+export type RaigamLink = {
+  id: string;
+  kind: RaigamLinkKind;
+  /** Raigam's item / outlet / route id */
+  raigamId: number;
+  /** Item: SAP code; Store: shop id; Route: route id */
+  appId: string;
+};
+
 export type OrderStatus = "Pending" | "Received" | "Posted";
 export type LineStatus = "Pending" | "Match" | "Unmatch";
 
-export type Result = { ok: true; id?: string } | { ok: false; error: string };
+/** `notes`: parts of a batch change that couldn't be done (e.g. bills a sync left out), the rest is saved */
+export type Result = { ok: true; id?: string; notes?: string[] } | { ok: false; error: string };
 
 export type ItemInput = Omit<Item, "id">;
 export type LocationInput = Omit<StoreLocation, "id">;
@@ -309,7 +340,7 @@ export type RaigamReturnInput = Omit<RaigamReturn, "id" | "returnNo">;
 export type ExpenseInput = Omit<Expense, "id" | "expenseNo">;
 export type SaleInput = Omit<
   Sale,
-  "id" | "saleNo" | "lines" | "returns" | "discount" | "status" | "late" | "deliveredDate" | "loadedDate" | "vehicleNumber"
+  "id" | "saleNo" | "lines" | "returns" | "discount" | "status" | "late" | "deliveredDate" | "loadedDate" | "vehicleNumber" | "checked" | "deliveryNote" | "extraCredit"
 > & {
   lines: SaleLineInput[];
   returns: SaleReturnInput[];
@@ -329,7 +360,7 @@ export type ReceiveLoadInput = {
   payment?: OrderPayment;
 };
 /** Money collected when delivering, and which bills it pays */
-export type CollectionInput = Pick<Payment, "amount" | "method" | "chequeNumber" | "chequeDate" | "reference" | "allocations">;
+export type CollectionInput = Pick<Payment, "amount" | "method" | "chequeNumber" | "chequeDate" | "chequeCollectedDate" | "reference" | "allocations">;
 export type DeliveryInput = {
   date: string;
   dueDate: string;
@@ -338,7 +369,11 @@ export type DeliveryInput = {
   cancels?: Record<string, number>;
   /** The bill's return items as checked at the store; left out = keep the ones entered with the bill */
   returns?: SaleReturnInput[];
+  /** Delivery note; left out = keep the bill's */
+  note?: string;
+  /** Credit amount added on the bill (owed with it, e.g. old credit); left out = keep the bill's */
+  extraCredit?: number;
 };
 export type PaymentInput = Omit<Payment, "id" | "receiptNo">;
 /** One payment for one shop bill (the store and the link to the bill are filled in for it) */
-export type BillPaymentInput = Pick<Payment, "date" | "amount" | "method" | "chequeNumber" | "chequeDate" | "reference">;
+export type BillPaymentInput = Pick<Payment, "date" | "amount" | "method" | "chequeNumber" | "chequeDate" | "chequeCollectedDate" | "reference">;

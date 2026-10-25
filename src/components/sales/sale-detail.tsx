@@ -5,20 +5,23 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { ReactNode } from "react";
 import { toast } from "sonner";
+import { ChequeStatusBadge } from "@/components/payments/cheque-status-field";
 import { PaymentFormDialog } from "@/components/payments/payment-form-dialog";
 import { BillStatusBadge, DueDateLabel } from "@/components/ui/badge";
 import { Button, buttonClass } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { BackLink, Card, CardHeader, Detail, PageHeader } from "@/components/ui/layout";
 import { EmptyRow, Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
-import { itemsTotal, lineValue, returnsTotal, saleSubtotal } from "@/lib/ledger";
+import { itemsTotal, lineValue, returnsTotal, saleSubtotal, wholesaleDifference } from "@/lib/ledger";
 import { saleCost, saleRevenue } from "@/lib/profit";
+import { allTakenOff } from "@/lib/raigam";
 import { useAppStore, useItemMap, useRouteMap, useSaleDues, useShopBalances, useShopMap } from "@/lib/store";
 import type { Payment } from "@/lib/types";
 import { useDialog } from "@/lib/use-dialog";
 import { cn, daysUntil, formatDate, formatMoney, formatQty, round2 } from "@/lib/utils";
 import { BillPaymentDialog } from "./bill-payment-dialog";
 import { BillStatusMenu } from "./bill-status-menu";
+import { CheckedToggle } from "./checked-toggle";
 import { DeliverDialog } from "./deliver-dialog";
 import { LoadLorryDialog } from "./load-lorry-dialog";
 import { ReturnKindBadge } from "./return-items";
@@ -71,6 +74,15 @@ export function SaleDetail({ id }: { id: string }) {
   const units = sale.lines.reduce((n, l) => n + l.qty - l.cancelQty, 0);
   const unitsOut = sale.lines.reduce((n, l) => n + l.qty + l.freeQty - (sale.status === "Delivered" ? l.cancelQty : 0), 0);
   const hasCancel = sale.lines.some((l) => l.cancelQty > 0);
+  const returnUnits = sale.returns.reduce((n, r) => n + r.qty, 0);
+  // Synced from Raigam with items taken off there: shown as on Raigam's bill (booked, taken off)
+  const hasTakenOff = sale.lines.some((l) => l.takenOff > 0);
+  const nothingLeft = allTakenOff(sale);
+  // Lines charged at a price other than the item's wholesale price, and what that adds up to
+  const priced = sale.lines.filter((l) => l.qty - l.cancelQty > 0 && wholesaleDifference(l.unitPrice, itemMap.get(l.sapCode)?.wholesalePrice) !== 0);
+  const pricedEffect = round2(
+    priced.reduce((sum, l) => sum + wholesaleDifference(l.unitPrice, itemMap.get(l.sapCode)?.wholesalePrice) * (l.qty - l.cancelQty), 0),
+  );
   const d = dues.get(sale.id)!;
   // Payment records on this bill (a receipt can also cover other bills; `amount` is this bill's part)
   const billPayments = d.payments.map((p) => ({ ...p, payment: payments.find((x) => x.id === p.paymentId) }));
@@ -84,7 +96,7 @@ export function SaleDetail({ id }: { id: string }) {
 
   return (
     <>
-      <BackLink href="/sales">Store Orders</BackLink>
+      <BackLink href="/invoices">Daily Invoices</BackLink>
       <PageHeader
         title={
           <span className="flex flex-wrap items-center gap-3">
@@ -194,7 +206,10 @@ export function SaleDetail({ id }: { id: string }) {
       <Card>
         <dl className="grid grid-cols-2 gap-x-6 gap-y-5 p-5 lg:grid-cols-4">
           <Detail label="Raigam Invoice No.">
-            {sale.invoiceNo || <span className="text-slate-400">Not entered</span>}
+            <span className="flex flex-wrap items-center gap-2">
+              {sale.invoiceNo || <span className="text-slate-400">Not entered</span>}
+              {sale.invoiceNo && <CheckedToggle sale={sale} />}
+            </span>
             <span className="block text-xs font-normal text-slate-500">Bill No. {sale.saleNo}</span>
           </Detail>
           <Detail label="Dealer (Store)">
@@ -255,6 +270,11 @@ export function SaleDetail({ id }: { id: string }) {
               <Detail label="Note">{sale.notes}</Detail>
             </div>
           )}
+          {sale.deliveryNote && (
+            <div className="col-span-2 lg:col-span-4">
+              <Detail label="Delivery Note">{sale.deliveryNote}</Detail>
+            </div>
+          )}
         </dl>
       </Card>
 
@@ -262,14 +282,53 @@ export function SaleDetail({ id }: { id: string }) {
         <div className="border-b border-slate-200 px-5 py-3">
           <h2 className="text-sm font-semibold text-slate-900">
             Invoice items <span className="font-normal text-slate-500">· {sale.lines.length}</span>
+            {nothingLeft && <span className="ml-2 font-normal text-red-600">· every item was taken off on Raigam, so nothing to load or collect</span>}
+            {priced.length > 0 && (
+              <span className="ml-2 font-normal text-amber-700 print:hidden">
+                · {priced.length} priced differently from your wholesale price ({pricedEffect > 0 ? "+" : "−"} {formatMoney(Math.abs(pricedEffect))} on
+                this bill)
+              </span>
+            )}
           </h2>
         </div>
+        {/* The bill in one line: items, less the return items (listed below the items), and what it comes to */}
+        <dl className="flex flex-wrap items-baseline gap-x-8 gap-y-2 border-b border-slate-200 bg-slate-50/70 px-5 py-3 text-sm print:hidden">
+          <div>
+            <dt className="text-xs text-slate-500">Items ({formatQty(units)} units)</dt>
+            <dd className="font-medium text-slate-900 tabular-nums">{formatMoney(itemsTotal(sale))}</dd>
+          </div>
+          <div>
+            <dt className="text-xs text-slate-500">
+              Returns
+              {sale.returns.length > 0 &&
+                ` (${formatQty(sale.returns.length)} item${sale.returns.length === 1 ? "" : "s"}, ${formatQty(returnUnits)} unit${returnUnits === 1 ? "" : "s"})`}
+            </dt>
+            <dd className={cn("font-medium tabular-nums", sale.returns.length ? "text-red-600" : "text-slate-400")}>
+              {sale.returns.length ? `− ${formatMoney(returnsTotal(sale))}` : "None"}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-xs text-slate-500">Value after returns</dt>
+            <dd className="font-medium text-slate-900 tabular-nums">{formatMoney(saleSubtotal(sale))}</dd>
+          </div>
+          {sale.discount > 0 && (
+            <div>
+              <dt className="text-xs text-slate-500">Bill discount ({sale.discountPercent}%)</dt>
+              <dd className="font-medium text-slate-900 tabular-nums">− {formatMoney(sale.discount)}</dd>
+            </div>
+          )}
+          <div className="sm:ml-auto sm:text-right">
+            <dt className="text-xs text-slate-500">Invoice value</dt>
+            <dd className="text-base font-semibold text-slate-900 tabular-nums">{formatMoney(d.total)}</dd>
+          </div>
+        </dl>
         <Table>
           <THead>
             <tr>
               <TH>#</TH>
               <TH>Item Description</TH>
-              <TH className="text-right">Qty</TH>
+              <TH className="text-right">{hasTakenOff ? "Booked" : "Qty"}</TH>
+              {hasTakenOff && <TH className="text-right">Taken off</TH>}
               <TH className="text-right">Free</TH>
               <TH className="text-right">Unit Price</TH>
               <TH className="text-right">Disc. %</TH>
@@ -279,9 +338,11 @@ export function SaleDetail({ id }: { id: string }) {
             </tr>
           </THead>
           <TBody>
+            {sale.lines.length === 0 && <EmptyRow colSpan={8 + Number(hasCancel) + Number(hasTakenOff)}>No items on this bill.</EmptyRow>}
             {sale.lines.map((l, i) => {
               const item = itemMap.get(l.sapCode);
               const book = round2((l.qty - l.cancelQty) * l.unitPrice);
+              const diff = wholesaleDifference(l.unitPrice, item?.wholesalePrice);
               return (
                 <TR key={l.id}>
                   <TD className="text-slate-400 tabular-nums">{i + 1}</TD>
@@ -292,9 +353,21 @@ export function SaleDetail({ id }: { id: string }) {
                       {item?.packageDetails ? ` · ${item.packageDetails}` : ""}
                     </span>
                   </TD>
-                  <TD className="text-right tabular-nums">{formatQty(l.qty)}</TD>
+                  {/* Booked on Raigam = what's left on the bill + what was taken off there */}
+                  <TD className="text-right tabular-nums">{formatQty(l.qty + l.takenOff)}</TD>
+                  {hasTakenOff && (
+                    <TD className={cn("text-right tabular-nums", l.takenOff > 0 && "font-medium text-red-600")}>{l.takenOff ? formatQty(l.takenOff) : "—"}</TD>
+                  )}
                   <TD className="text-right tabular-nums">{l.freeQty ? formatQty(l.freeQty) : "—"}</TD>
-                  <TD className="text-right tabular-nums">{formatMoney(l.unitPrice)}</TD>
+                  <TD className={cn("text-right tabular-nums", diff && l.qty - l.cancelQty > 0 && "bg-amber-50/70")}>
+                    {formatMoney(l.unitPrice)}
+                    {diff !== 0 && l.qty - l.cancelQty > 0 && (
+                      <span className="block text-xs font-medium text-amber-700 print:hidden" title="Your wholesale price for this item, and how much the bill's price differs">
+                        Wholesale {formatMoney(item!.wholesalePrice)} · {diff > 0 ? "+" : "−"}
+                        {formatMoney(Math.abs(diff))}
+                      </span>
+                    )}
+                  </TD>
                   <TD className="text-right tabular-nums">{l.discountPct ? `${l.discountPct}%` : "—"}</TD>
                   <TD className="text-right tabular-nums">{l.discountPct ? formatMoney(round2(book - lineValue(l))) : "—"}</TD>
                   {hasCancel && <TD className="text-right tabular-nums">{l.cancelQty ? formatQty(l.cancelQty) : "—"}</TD>}
@@ -363,6 +436,12 @@ export function SaleDetail({ id }: { id: string }) {
             <dd className="border-t border-slate-200 pt-2 text-right text-base font-semibold text-slate-900 tabular-nums">
               {formatMoney(d.total)}
             </dd>
+            {d.extraCredit > 0 && (
+              <>
+                <dt className="text-slate-500">Credit added at delivery</dt>
+                <dd className="text-right tabular-nums">+ {formatMoney(d.extraCredit)}</dd>
+              </>
+            )}
             {d.delivered && d.payments.length === 0 && (
               <>
                 <dt className="text-slate-500">Paid</dt>
@@ -372,9 +451,12 @@ export function SaleDetail({ id }: { id: string }) {
             {d.payments.map((p) => (
               <div key={p.paymentId} className="contents">
                 <dt className="text-slate-500">
-                  Paid {p.receiptNo} <span className="text-xs">({formatDate(p.date)})</span>
+                  {p.pending ? "Cheque to collect" : "Paid"} {p.receiptNo} <span className="text-xs">({formatDate(p.date)})</span>
                 </dt>
-                <dd className="text-right text-emerald-700 tabular-nums">− {formatMoney(p.amount)}</dd>
+                {/* A cheque still to collect isn't paid yet: shown, not taken off */}
+                <dd className={cn("text-right tabular-nums", p.pending ? "text-slate-400" : "text-emerald-700")}>
+                  {p.pending ? `(${formatMoney(p.amount)})` : `− ${formatMoney(p.amount)}`}
+                </dd>
               </div>
             ))}
             <dt className="border-t border-slate-200 pt-2 text-base font-semibold text-slate-900">
@@ -466,15 +548,21 @@ export function SaleDetail({ id }: { id: string }) {
                   <TD>
                     {p.payment?.method ?? "—"}
                     {p.payment?.method === "Cheque" && (
-                      <span className="block text-xs text-slate-500">
-                        No. {p.payment.chequeNumber}
-                        {p.payment.chequeDate ? ` · ${formatDate(p.payment.chequeDate)}` : ""}
-                      </span>
+                      <>
+                        <span className="block text-xs text-slate-500">
+                          No. {p.payment.chequeNumber || "—"}
+                          {p.payment.chequeDate ? ` · ${formatDate(p.payment.chequeDate)}` : ""}
+                        </span>
+                        <span className="mt-1 block">
+                          <ChequeStatusBadge payment={p.payment} />
+                        </span>
+                      </>
                     )}
                   </TD>
                   <TD className="max-w-64 whitespace-normal text-slate-600">{p.payment?.reference || <span className="text-slate-400">—</span>}</TD>
-                  <TD className="text-right font-medium text-emerald-700 tabular-nums">
+                  <TD className={cn("text-right font-medium tabular-nums", p.pending ? "text-slate-500" : "text-emerald-700")}>
                     {formatMoney(p.amount)}
+                    {p.pending && <span className="block text-xs font-normal">not paid until collected</span>}
                     {p.payment && p.payment.amount > p.amount + 0.004 && (
                       <span className="block text-xs font-normal text-slate-500">of {formatMoney(p.payment.amount)} receipt</span>
                     )}
@@ -587,7 +675,7 @@ export function SaleDetail({ id }: { id: string }) {
             return;
           }
           toast.success(`${sale.saleNo} deleted`);
-          router.push("/sales");
+          router.push("/invoices");
         }}
       />
     </>

@@ -1,0 +1,1 @@
+ALTER TABLE "payments" ADD COLUMN "cheque_collected_date" date;

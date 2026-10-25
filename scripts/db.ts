@@ -60,7 +60,9 @@ async function backup() {
 async function restore() {
   const file = rest.find((a) => !a.startsWith("--"));
   if (!file) throw new Error("Give the backup file, e.g. pnpm db:restore backups/raigam-2026-10-22.json --yes");
-  const { app, data } = JSON.parse(readFileSync(file, "utf8")) as { app?: string; data?: Data };
+  const { app, data: saved } = JSON.parse(readFileSync(file, "utf8")) as { app?: string; data?: Partial<Data> };
+  // A backup made before a table was added doesn't have it: that table starts empty
+  const data = saved && { ...emptyData(), ...saved };
   if (app !== "raigam-store" || !data || !DATA_KEYS.every((k) => Array.isArray(data[k]))) throw new Error(`${file} is not a backup made by pnpm db:backup.`);
   if (!rest.includes("--yes")) {
     throw new Error(`This replaces everything in the database with the ${count(data)} records in ${file}. Add --yes to go ahead.`);

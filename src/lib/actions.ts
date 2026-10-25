@@ -4,9 +4,11 @@ import { cookies } from "next/headers";
 import { getDb } from "@/db";
 import { applyAction, fetchData, type ActionResponse } from "@/db/repo";
 import { ACTION_NAMES, fail, type ActionName, type Data } from "./core";
+import { RAIGAM_ITEMS_BATCH, type RaigamBill, type RaigamLine } from "./raigam";
+import { listRaigamBills, RaigamError, readRaigamLines } from "./raigam-sfa";
 import { createSupabase } from "./supabase";
 import type { Result } from "./types";
-import { todayISO } from "./utils";
+import { addDays, todayISO } from "./utils";
 
 // The browser calls these; every check in core.ts runs here again on fresh data,
 // so a stale screen can't oversell stock or overpay a bill.
@@ -99,5 +101,41 @@ export async function runAction(name: ActionName, args: unknown[], today: string
   } catch (error) {
     console.error(`[runAction] ${name} failed:`, error);
     return { result: fail("Couldn't save the change. Please try again."), changes: {} };
+  }
+}
+
+// ---------- Sync from Raigam: reading only; saving goes through runAction("syncRaigamBills") ----------
+
+/** Longest date range read at once */
+const RAIGAM_MAX_DAYS = 92;
+
+const isISODate = (v: unknown): v is string => typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v);
+
+function raigamFailure(where: string, error: unknown) {
+  if (error instanceof RaigamError) return { error: error.message };
+  console.error(`[${where}] failed:`, error);
+  return { error: "Couldn't read the bills from Raigam. Please try again." };
+}
+
+/** Bills booked on Raigam between two dates (without their items) */
+export async function readRaigamBills(from: string, to: string): Promise<{ bills: RaigamBill[] } | { error: string } | SignedOut> {
+  if ((await signedInEmail()) === null) return { signedOut: true };
+  if (!isISODate(from) || !isISODate(to) || from > to) return { error: "Choose a From date on or before the To date." };
+  if (addDays(from, RAIGAM_MAX_DAYS) < to) return { error: `Choose up to ${RAIGAM_MAX_DAYS} days at a time.` };
+  try {
+    return { bills: await listRaigamBills(from, to) };
+  } catch (error) {
+    return raigamFailure("readRaigamBills", error);
+  }
+}
+
+/** Items on Raigam bills, by bill id */
+export async function readRaigamItems(ids: number[]): Promise<{ lines: Record<number, RaigamLine[]> } | { error: string } | SignedOut> {
+  if ((await signedInEmail()) === null) return { signedOut: true };
+  if (!Array.isArray(ids) || ids.length > RAIGAM_ITEMS_BATCH || !ids.every((id) => Number.isInteger(id) && id > 0)) return { error: "Unknown bills." };
+  try {
+    return { lines: await readRaigamLines(ids) };
+  } catch (error) {
+    return raigamFailure("readRaigamItems", error);
   }
 }

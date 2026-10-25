@@ -199,6 +199,9 @@ export const seedSales: Sale[] = [...historyBills, ...octoberBills].map((b, i): 
     discountPercent: 0,
     status: b.status,
     late: false,
+    checked: false,
+    deliveryNote: "",
+    extraCredit: 0,
     loadedDate: moved ? b.date : "",
     vehicleNumber: moved ? (routeFor(b.shopId)?.vehicleNumber ?? "") : "",
     deliveredDate: b.status === "Delivered" ? b.date : "",
@@ -213,6 +216,7 @@ export const seedSales: Sale[] = [...historyBills, ...octoberBills].map((b, i): 
       unitPrice: price(sapCode),
       discountPct: 0,
       cancelQty: 0,
+      takenOff: 0,
       costPrice: cost(sapCode),
     })),
     returns: [],
@@ -231,6 +235,7 @@ const collection = (date: string, shopId: string, amount: number, allocations: P
   method: "Cash",
   chequeNumber: "",
   chequeDate: "",
+  chequeCollectedDate: "",
   reference: "",
   allocations,
   ...extra,
@@ -243,6 +248,8 @@ const historyPayments: SeedPayment[] = historyBills.map((b, n) => {
     method: cheque ? "Cheque" : "Cash",
     chequeNumber: cheque ? String(540100 + n) : "",
     chequeDate: cheque ? addDays(b.date, 14) : "",
+    // Older cheques are in the bank
+    chequeCollectedDate: cheque ? addDays(b.date, 16) : "",
   });
 });
 

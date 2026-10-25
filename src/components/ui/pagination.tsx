@@ -9,8 +9,8 @@ const PAGE_SIZES = [10, 25, 50, 100];
  * Splits table rows into pages. Goes back to page 1 when `filters` change (search
  * text, dropdowns), and stays in range when rows are deleted.
  */
-export function usePagination<T>(rows: T[], filters: unknown[] = []) {
-  const [pageSize, setPageSize] = useState(25);
+export function usePagination<T>(rows: T[], filters: unknown[] = [], initialSize = 25) {
+  const [pageSize, setPageSize] = useState(initialSize);
   const [page, setPage] = useState(1);
   const filterKey = JSON.stringify(filters);
   const [lastFilterKey, setLastFilterKey] = useState(filterKey);

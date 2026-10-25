@@ -1,0 +1,1 @@
+ALTER TABLE "sale_lines" ADD COLUMN "taken_off" integer DEFAULT 0 NOT NULL;

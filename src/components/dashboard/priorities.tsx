@@ -175,7 +175,7 @@ function usePriorities(): Priority[] {
         area: "Lorry",
         title: `${toLoad.length} bill${toLoad.length > 1 ? "s" : ""} waiting to load`,
         detail: `${formatMoney(toLoad.reduce((sum, s) => sum + saleTotal(s), 0))} · oldest from ${formatDate(oldest.date)}${waited >= 2 ? ` (${waited} days)` : ""}`,
-        href: "/sales?load=1",
+        href: "/invoices?load=1",
         action: "Load lorry",
       });
     }

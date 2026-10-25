@@ -12,6 +12,10 @@ const nextConfig: NextConfig = {
       },
     },
   },
+  // The Store Orders list is now part of Daily Invoices; old links keep working (?filter= / ?load= pass through)
+  async redirects() {
+    return [{ source: "/sales", destination: "/invoices", permanent: false }];
+  },
   // Safety headers on every page: other sites can't show the app inside a frame (to trick a
   // click), browsers keep to HTTPS, and search engines leave the business data out
   async headers() {

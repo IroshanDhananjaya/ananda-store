@@ -2,6 +2,7 @@
 
 import { Pencil, Plus, Trash2 } from "lucide-react";
 import { useState, type FormEvent } from "react";
+import { ChequeStatusBadge, ChequeStatusField } from "@/components/payments/cheque-status-field";
 import { Button } from "@/components/ui/button";
 import { Field, Input, toNumber } from "@/components/ui/form";
 import { FilterTabs } from "@/components/ui/layout";
@@ -29,6 +30,7 @@ function BillPaymentForm({
   const [amount, setAmount] = useState(() => (left > 0 ? String(left) : ""));
   const [chequeNumber, setChequeNumber] = useState("");
   const [chequeDate, setChequeDate] = useState("");
+  const [chequeCollectedDate, setChequeCollectedDate] = useState("");
   const [reference, setReference] = useState("");
   const [error, setError] = useState<string>();
   const value = round2(toNumber(amount));
@@ -41,7 +43,7 @@ function BillPaymentForm({
     if (!date) err = "Enter the payment date.";
     else if (!(value > 0)) err = "Enter the amount paid.";
     else if (value > left + 0.004) err = `Only ${formatMoney(left)} is left to pay on this bill.`;
-    else if (method === "Cheque" && !chequeNumber.trim()) err = "Enter the cheque number.";
+    else if (method === "Cheque" && chequeCollectedDate && !chequeNumber.trim()) err = "Enter the cheque number of the collected cheque.";
     if (!err) {
       err = await onSave({
         date,
@@ -49,6 +51,7 @@ function BillPaymentForm({
         method,
         chequeNumber: method === "Cheque" ? chequeNumber.trim() : "",
         chequeDate: method === "Cheque" ? chequeDate : "",
+        chequeCollectedDate: method === "Cheque" ? chequeCollectedDate : "",
         reference: reference.trim(),
       });
     }
@@ -100,16 +103,22 @@ function BillPaymentForm({
       </div>
       {method === "Cheque" && (
         <>
-          <Field label="Cheque Number" htmlFor="billPayChq" required>
+          <Field label="Cheque Number" htmlFor="billPayChq" required={!!chequeCollectedDate}>
             <Input id="billPayChq" value={chequeNumber} onChange={(e) => setChequeNumber(e.target.value)} inputMode="numeric" />
           </Field>
           <Field label="Cheque Date" htmlFor="billPayChqDate" hint="When it can be banked">
             <Input id="billPayChqDate" type="date" value={chequeDate} onChange={(e) => setChequeDate(e.target.value)} />
           </Field>
+          <ChequeStatusField collectedDate={chequeCollectedDate} onChange={setChequeCollectedDate} receivedDate={date} className="sm:col-span-2" />
         </>
       )}
       <Field label={method === "Bank Transfer" ? "Transfer reference" : "Note"} htmlFor="billPayRef" className="sm:col-span-2">
-        <Input id="billPayRef" value={reference} onChange={(e) => setReference(e.target.value)} placeholder="Optional" />
+        <Input
+          id="billPayRef"
+          value={reference}
+          onChange={(e) => setReference(e.target.value)}
+          placeholder={method === "Cheque" ? "Bank, branch, who gave it… (optional)" : "Optional"}
+        />
       </Field>
       {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 sm:col-span-2">{error}</p>}
     </form>
@@ -189,6 +198,11 @@ export function BillPaymentList({
               {p.method === "Cheque" && p.chequeDate ? ` · cheque date ${formatDate(p.chequeDate)}` : ""}
               {p.reference ? ` · ${p.reference}` : ""}
             </p>
+            {p.method === "Cheque" && (
+              <span className="mt-1 inline-block">
+                <ChequeStatusBadge payment={p} />
+              </span>
+            )}
           </div>
           <span className="text-right font-semibold text-emerald-700 tabular-nums">
             {formatMoney(p.amount)}

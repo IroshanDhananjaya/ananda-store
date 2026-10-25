@@ -4,7 +4,8 @@ import { AlertTriangle, Wand2 } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Field, Input, ReadOnlyValue, toNumber } from "@/components/ui/form";
+import { ChequeStatusField } from "@/components/payments/cheque-status-field";
+import { Field, Input, ReadOnlyValue, Textarea, toNumber } from "@/components/ui/form";
 import { FilterTabs } from "@/components/ui/layout";
 import { Modal } from "@/components/ui/modal";
 import { StackBox } from "@/components/ui/table";
@@ -15,6 +16,8 @@ import { addDays, formatDate, formatMoney, formatQty, round2, todayISO } from "@
 import { changesError, changesFrom, changesInput, DeliveryChanges, totalsWith, type DeliveryChangesValue } from "./delivery-changes";
 
 type Allocs = Record<string, string>;
+/** Longest credit (end date or cheque date) given after delivery */
+const MAX_CREDIT_DAYS = 21;
 const toAllocs = (list: { saleId: string; amount: number }[]): Allocs => Object.fromEntries(list.map((a) => [a.saleId, String(a.amount)]));
 
 function DeliverForm({ sale, onDone }: { sale: Sale; onDone: () => void }) {
@@ -31,22 +34,41 @@ function DeliverForm({ sale, onDone }: { sale: Sale; onDone: () => void }) {
   const [changes, setChanges] = useState<DeliveryChangesValue>(() => changesFrom(sale));
   const total = totalsWith(sale, changes).total;
 
-  // This bill first, then the store's other unpaid bills (oldest first)
-  const billsFor = (thisTotal: number): OpenBill[] => [
-    { id: sale.id, ref: `${sale.saleNo} (this delivery)`, date: "", dueDate: "", total: thisTotal, paid: prepaid, due: Math.max(0, round2(thisTotal - prepaid)), overdueDays: 0 },
+  // Credit amount added on this bill (e.g. old credit to collect with it): owed with the bill, not part of its invoice value
+  const [creditAmount, setCreditAmount] = useState(() => (sale.extraCredit ? String(sale.extraCredit) : ""));
+  const credit = Math.max(0, toNumber(creditAmount));
+
+  // This bill first (its invoice value plus the credit added), then the store's other unpaid bills (oldest first)
+  const billsFor = (thisTotal: number, added: number): OpenBill[] => [
+    {
+      id: sale.id,
+      ref: `${sale.saleNo} (this delivery)`,
+      date: "",
+      dueDate: "",
+      total: round2(thisTotal + added),
+      paid: prepaid,
+      due: Math.max(0, round2(thisTotal + added - prepaid)),
+      overdueDays: 0,
+    },
     ...(shop ? openBills(shop, sales, payments) : []),
   ];
-  const bills = billsFor(total);
+  const bills = billsFor(total, credit);
 
   const [date, setDate] = useState(todayISO);
   // End date for the balance: the store's credit days after delivery (follows the delivery date until changed here)
   const creditDays = shop?.creditDays ?? 21;
   const [dueDate, setDueDate] = useState(() => addDays(todayISO(), creditDays));
   const [dueTouched, setDueTouched] = useState(false);
+  // Credit and cheques are given for up to this long after delivery (warned, not blocked)
+  const latestDate = addDays(date, MAX_CREDIT_DAYS);
   const [amount, setAmount] = useState("");
   const [method, setMethod] = useState<PaymentMethod>("Cash");
   const [chequeNumber, setChequeNumber] = useState("");
   const [chequeDate, setChequeDate] = useState("");
+  const [chequeCollectedDate, setChequeCollectedDate] = useState("");
+  /** Note on the money collected (cheque bank / branch, transfer reference, …) */
+  const [note, setNote] = useState("");
+  const [deliveryNote, setDeliveryNote] = useState(sale.deliveryNote);
   const [allocs, setAllocs] = useState<Allocs>({});
   const [manual, setManual] = useState(false);
   const [error, setError] = useState<string>();
@@ -59,10 +81,13 @@ function DeliverForm({ sale, onDone }: { sale: Sale; onDone: () => void }) {
           .filter((x) => x.have < x.line.qty + x.line.freeQty)
       : [];
 
+  const allocOf = (billId: string) => toNumber(allocs[billId] ?? "");
   const collected = toNumber(amount);
-  const linked = round2(bills.reduce((sum, b) => sum + toNumber(allocs[b.id] ?? ""), 0));
+  const linked = round2(bills.reduce((sum, b) => sum + allocOf(b.id), 0));
   const unlinked = round2(collected - linked);
-  const thisBillPaid = toNumber(allocs[sale.id] ?? "");
+  // A cheque still to collect isn't paid yet: the bill keeps its balance until it's collected
+  const pendingCheque = method === "Cheque" && !chequeCollectedDate;
+  const thisBillPaid = pendingCheque ? 0 : allocOf(sale.id);
   const thisBillBalance = round2(bills[0].due - thisBillPaid);
 
   function changeAmount(value: string) {
@@ -75,7 +100,13 @@ function DeliverForm({ sale, onDone }: { sale: Sale; onDone: () => void }) {
     setChanges(next);
     setError(undefined);
     // The bill total moved: spread the money again (unless the amounts were typed by hand)
-    if (!manual && collected > 0) setAllocs(toAllocs(autoAllocate(collected, billsFor(totalsWith(sale, next).total))));
+    if (!manual && collected > 0) setAllocs(toAllocs(autoAllocate(collected, billsFor(totalsWith(sale, next).total, credit))));
+  }
+
+  function changeCredit(value: string) {
+    setCreditAmount(value);
+    setError(undefined);
+    if (!manual && collected > 0) setAllocs(toAllocs(autoAllocate(collected, billsFor(total, Math.max(0, toNumber(value))))));
   }
 
   async function handleSubmit(e: FormEvent) {
@@ -84,16 +115,21 @@ function DeliverForm({ sale, onDone }: { sale: Sale; onDone: () => void }) {
     const changeErr = changesError(sale, changes);
     if (changeErr) return setError(changeErr);
     if (collected < 0) return setError("Amount can't be negative.");
-    const over = bills.find((b) => toNumber(allocs[b.id] ?? "") > b.due + 0.004);
+    const over = bills.find((b) => allocOf(b.id) > b.due + 0.004);
     if (over) return setError(`${over.ref} only has ${formatMoney(over.due)} to pay.`);
     if (unlinked < -0.004) return setError("The bill amounts add up to more than the money collected.");
     if (thisBillBalance > 0 && (!dueDate || dueDate < date)) return setError("Set the end date for collecting the balance (on or after the delivery date).");
-    if (method === "Cheque" && collected > 0 && !chequeNumber.trim()) return setError("Enter the cheque number.");
+    if (toNumber(creditAmount) < 0) return setError("Credit amount can't be negative.");
+    if (method === "Cheque" && collected > 0 && chequeCollectedDate && !chequeNumber.trim()) return setError("Enter the cheque number of the collected cheque.");
+    // A cheque filled in without its amount would be lost
+    if (method === "Cheque" && !(collected > 0) && chequeNumber.trim()) return setError("Enter the cheque amount in Money collected now.");
 
     const result = await deliverSale(sale.id, {
       ...changesInput(changes),
       date,
       dueDate: thisBillBalance > 0 ? dueDate : date,
+      note: deliveryNote,
+      extraCredit: credit,
       collection:
         collected > 0
           ? {
@@ -101,8 +137,9 @@ function DeliverForm({ sale, onDone }: { sale: Sale; onDone: () => void }) {
               method,
               chequeNumber,
               chequeDate,
-              reference: `Collected on delivery of ${sale.saleNo}`,
-              allocations: bills.map((b) => ({ saleId: b.id, amount: toNumber(allocs[b.id] ?? "") })).filter((a) => a.amount > 0),
+              chequeCollectedDate: method === "Cheque" ? chequeCollectedDate : "",
+              reference: [note.trim(), `Collected on delivery of ${sale.saleNo}`].filter(Boolean).join(" · "),
+              allocations: bills.map((b) => ({ saleId: b.id, amount: allocOf(b.id) })).filter((a) => a.amount > 0),
             }
           : null,
     });
@@ -111,9 +148,11 @@ function DeliverForm({ sale, onDone }: { sale: Sale; onDone: () => void }) {
       return;
     }
     toast.success(
-      thisBillBalance > 0
+      (thisBillBalance > 0
         ? `${sale.saleNo} delivered · ${formatMoney(thisBillBalance)} to collect by ${formatDate(dueDate)}`
-        : `${sale.saleNo} delivered and fully paid`,
+        : `${sale.saleNo} delivered and fully paid`) +
+        (credit > 0 ? ` (incl. credit added ${formatMoney(credit)})` : "") +
+        (pendingCheque && collected > 0 ? ` · cheque ${formatMoney(collected)} still to collect` : ""),
     );
     onDone();
   }
@@ -164,9 +203,32 @@ function DeliverForm({ sale, onDone }: { sale: Sale; onDone: () => void }) {
       </details>
 
       <Field
+        label="Credit amount to add (Rs.)"
+        htmlFor="dlvCredit"
+        hint={
+          credit > 0
+            ? `${sale.saleNo} to collect: invoice ${formatMoney(total)} + credit ${formatMoney(credit)} = ${formatMoney(round2(total + credit))}. Not a sale: the invoice value, profit and Raigam totals stay the same.`
+            : "Optional: money the store owes on top of this bill (e.g. old credit to collect with it, even on a Rs. 0 bill). The unpaid part of the bill is on credit by itself."
+        }
+        className="sm:col-span-2"
+      >
+        <Input
+          id="dlvCredit"
+          type="number"
+          min={0}
+          step="0.01"
+          inputMode="decimal"
+          value={creditAmount}
+          placeholder="0"
+          onChange={(e) => changeCredit(e.target.value)}
+          className="font-semibold tabular-nums sm:w-60"
+        />
+      </Field>
+
+      <Field
         label="Money collected now (Rs.)"
         htmlFor="dlvAmount"
-        hint="Leave empty if the store pays later. You can add payments on the bill any time."
+        hint="Leave empty if the store pays later (on credit). You can add payments on the bill any time."
       >
         <div className="flex gap-2">
           <Input
@@ -189,15 +251,40 @@ function DeliverForm({ sale, onDone }: { sale: Sale; onDone: () => void }) {
       <Field label="Method">
         <FilterTabs<PaymentMethod> value={method} onChange={setMethod} options={PAYMENT_METHODS.map((m) => ({ value: m, label: m }))} />
       </Field>
-      {method === "Cheque" && collected > 0 && (
+      {method === "Cheque" && (
         <>
-          <Field label="Cheque Number" htmlFor="dlvChq" required>
+          <Field label="Cheque Number" htmlFor="dlvChq" required={!!chequeCollectedDate} hint={chequeCollectedDate ? undefined : "Add it now or when you collect the cheque"}>
             <Input id="dlvChq" value={chequeNumber} onChange={(e) => setChequeNumber(e.target.value)} inputMode="numeric" />
           </Field>
-          <Field label="Cheque Date" htmlFor="dlvChqDate">
+          <Field
+            label="Cheque Date"
+            htmlFor="dlvChqDate"
+            hint={
+              chequeDate > latestDate ? (
+                <span className="font-medium text-amber-700">More than {MAX_CREDIT_DAYS} days after delivery (latest {formatDate(latestDate)}).</span>
+              ) : (
+                "When it can be banked"
+              )
+            }
+          >
             <Input id="dlvChqDate" type="date" value={chequeDate} onChange={(e) => setChequeDate(e.target.value)} />
           </Field>
+          <ChequeStatusField collectedDate={chequeCollectedDate} onChange={setChequeCollectedDate} receivedDate={date} />
         </>
+      )}
+      {(collected > 0 || method === "Cheque") && (
+        <Field
+          label={method === "Bank Transfer" ? "Transfer reference" : method === "Cheque" ? "Cheque note" : "Payment note"}
+          htmlFor="dlvNote"
+          className={method === "Cheque" ? undefined : "sm:col-span-2"}
+        >
+          <Input
+            id="dlvNote"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder={method === "Cheque" ? "Bank, branch, who gave it… (optional)" : "Optional"}
+          />
+        </Field>
       )}
 
       {collected > 0 && (
@@ -263,7 +350,13 @@ function DeliverForm({ sale, onDone }: { sale: Sale; onDone: () => void }) {
             </StackBox>
             {unlinked > 0.004 && (
               <p className="border-t border-slate-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                {formatMoney(unlinked)} isn&apos;t for any bill. It will be kept as an advance for this store.
+                {formatMoney(unlinked)} isn&apos;t for any bill. It will be kept as an advance for this store. If it&apos;s for credit the store owes,
+                enter that in <span className="font-medium">Credit amount to add</span> above.
+              </p>
+            )}
+            {pendingCheque && collected > 0 && (
+              <p className="border-t border-slate-200 bg-sky-50 px-3 py-2 text-xs text-sky-800">
+                This cheque is still to collect: it pays these bills once you mark it collected (here, on the bill, or on Cheques &amp; Credit).
               </p>
             )}
           </div>
@@ -272,7 +365,9 @@ function DeliverForm({ sale, onDone }: { sale: Sale; onDone: () => void }) {
 
       <div className="rounded-lg bg-slate-50 px-3 py-2.5 text-sm sm:col-span-2">
         <div className="flex justify-between">
-          <span className="text-slate-600">{sale.saleNo} balance after delivery</span>
+          <span className="text-slate-600">
+            {sale.saleNo} {thisBillBalance > 0 ? "balance on credit" : "balance"} after delivery
+          </span>
           <span className={thisBillBalance > 0 ? "font-semibold text-red-600 tabular-nums" : "font-semibold text-emerald-700 tabular-nums"}>
             {formatMoney(Math.max(0, thisBillBalance))}
           </span>
@@ -283,7 +378,15 @@ function DeliverForm({ sale, onDone }: { sale: Sale; onDone: () => void }) {
           label="End date to collect the balance"
           htmlFor="dlvDue"
           required
-          hint={`${creditDays} day${creditDays === 1 ? "" : "s"} after delivery (the store's credit days). Change it if needed.`}
+          hint={
+            dueDate > latestDate ? (
+              <span className="font-medium text-amber-700">
+                More than {MAX_CREDIT_DAYS} days after delivery: credit is given for up to {MAX_CREDIT_DAYS} days (latest {formatDate(latestDate)}).
+              </span>
+            ) : (
+              `${creditDays} day${creditDays === 1 ? "" : "s"} after delivery (the store's credit days). Change it if needed.`
+            )
+          }
           className="sm:col-span-2"
         >
           <Input
@@ -298,6 +401,21 @@ function DeliverForm({ sale, onDone }: { sale: Sale; onDone: () => void }) {
           />
         </Field>
       )}
+      <Field
+        label="Delivery note"
+        htmlFor="dlvDeliveryNote"
+        hint={thisBillBalance > 0 ? "Shown on the bill, and on Cheques & Credit while the balance is on credit." : "Shown on the bill."}
+        className="sm:col-span-2"
+      >
+        <Textarea
+          id="dlvDeliveryNote"
+          value={deliveryNote}
+          onChange={(e) => setDeliveryNote(e.target.value)}
+          rows={2}
+          className="min-h-16"
+          placeholder="Anything about this delivery or the credit, e.g. will pay on Friday, given to the owner's son… (optional)"
+        />
+      </Field>
       {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 sm:col-span-2">{error}</p>}
     </form>
   );

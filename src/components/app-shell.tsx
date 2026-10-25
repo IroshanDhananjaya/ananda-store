@@ -6,6 +6,7 @@ import {
   ClipboardList,
   Gift,
   HandCoins,
+  Landmark,
   LayoutDashboard,
   ListChecks,
   LogOut,
@@ -15,11 +16,11 @@ import {
   Receipt,
   RotateCcw,
   Route,
-  ShoppingCart,
   Store,
   TrendingUp,
   Warehouse,
   X,
+  type LucideIcon,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -32,17 +33,21 @@ import { signOut } from "@/lib/actions";
 import { useAppStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
-const nav = [
+/** `also`: pages under this path count as this one (highlighted in the sidebar) */
+type NavItem = { href: string; label: string; icon: LucideIcon; also?: string };
+
+const nav: { title: string | null; items: NavItem[] }[] = [
   { title: null, items: [{ href: "/", label: "Dashboard", icon: LayoutDashboard }] },
   {
     title: "Sales",
     items: [
       { href: "/routes", label: "Routes", icon: Route },
       { href: "/stores", label: "Stores", icon: Store },
-      { href: "/sales", label: "Store Orders", icon: ShoppingCart },
-      { href: "/invoices", label: "Daily Invoices", icon: CalendarDays },
+      // Bills (/sales/…) open from here
+      { href: "/invoices", label: "Daily Invoices", icon: CalendarDays, also: "/sales" },
       { href: "/free-issues", label: "Free Issues", icon: Gift },
       { href: "/payments", label: "Payments", icon: HandCoins },
+      { href: "/cheques", label: "Cheques & Credit", icon: Landmark },
     ],
   },
   {
@@ -78,8 +83,9 @@ function NavLinks({ pathname, onNavigate }: { pathname: string | null; onNavigat
           {section.title && (
             <p className="px-3 pb-1 text-[11px] font-semibold tracking-wider text-brand-300 uppercase">{section.title}</p>
           )}
-          {section.items.map(({ href, label, icon: Icon }) => {
-            const active = pathname !== null && (href === "/" ? pathname === "/" : pathname === href || pathname.startsWith(href + "/"));
+          {section.items.map(({ href, label, icon: Icon, also }) => {
+            const under = (path: string) => pathname === path || pathname?.startsWith(path + "/");
+            const active = pathname !== null && (href === "/" ? pathname === "/" : under(href) || (!!also && under(also)));
             return (
               <Link
                 key={href}
