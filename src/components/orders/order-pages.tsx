@@ -9,6 +9,7 @@ import { BackLink, NotFoundState, PageHeader } from "@/components/ui/layout";
 import { useAppStore } from "@/lib/store";
 import { useResetKey } from "@/lib/use-dialog";
 import { OrderForm } from "./order-form";
+import { OrderSheet } from "./order-sheet";
 import { ReceiveLoadForm } from "./receive-load-form";
 
 export function OrderNotFound() {
@@ -27,9 +28,15 @@ export function NewOrder() {
 
   return (
     <>
-      <BackLink href="/orders">Purchase Orders</BackLink>
-      <PageHeader title="New purchase order" description="Record an order placed with Raigam and the items on it." />
-      <OrderForm
+      {/* Printing shows only the order sheet */}
+      <div className="print:hidden">
+        <BackLink href="/orders">Purchase Orders</BackLink>
+        <PageHeader
+          title="New purchase order"
+          description="Raigam's goods order sheet: fill in the Order Qty for what you need, save it, then print or send it to Raigam."
+        />
+      </div>
+      <OrderSheet
         key={`${key}-${itemsParam}`}
         order={null}
         lines={[]}
@@ -90,6 +97,19 @@ export function EditOrder({ id }: { id: string }) {
             Go to order
           </Link>
         </div>
+      </>
+    );
+  }
+
+  // Until the goods arrive the order is the goods order sheet; after that, the invoice details
+  if (!order.receivedDate) {
+    return (
+      <>
+        <div className="print:hidden">
+          <BackLink href={`/orders/${id}`}>{order.orderId}</BackLink>
+          <PageHeader title={`Edit ${order.orderId}`} description="Change the Order Qty on the goods order sheet, or print it again." />
+        </div>
+        <OrderSheet key={key} order={order} lines={lines} cancelHref={`/orders/${id}`} onSaved={() => router.push(`/orders/${id}`)} />
       </>
     );
   }

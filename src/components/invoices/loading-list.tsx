@@ -1,11 +1,12 @@
 "use client";
 
 import { ChevronDown, ChevronsUpDown, ChevronUp } from "lucide-react";
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { TableFooter } from "@/components/ui/layout";
 import { Pagination, usePagination } from "@/components/ui/pagination";
-import { EmptyRow, Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
-import { useAppStore, useItemMap } from "@/lib/store";
+import { EmptyRow, GroupRow, Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
+import { categoryOf } from "@/lib/categories";
+import { useAppStore, useCategoryRanks, useItemMap } from "@/lib/store";
 import type { Sale } from "@/lib/types";
 import { lineValue } from "@/lib/ledger";
 import { cn, formatMoney, formatQty, includesText } from "@/lib/utils";
@@ -19,6 +20,8 @@ type ItemTotal = {
   free: number;
   /** On bills already loaded or delivered (out of stock) */
   loaded: number;
+  /** Not in the store when those bills were loaded (not loaded, taken off the bills) */
+  missing: number;
   /** On bills still waiting to load */
   toLoad: number;
   /** Booked qty × unit price, before bill discounts */
@@ -67,6 +70,7 @@ function SortTH({
 export function LoadingList({ sales, query }: { sales: Sale[]; query: string }) {
   const stock = useAppStore((s) => s.stock);
   const itemMap = useItemMap();
+  const ranks = useCategoryRanks();
   const [sort, setSort] = useState<Sort>({ key: "sapCode", dir: "asc" });
 
   const rows = useMemo(() => {
@@ -75,15 +79,19 @@ export function LoadingList({ sales, query }: { sales: Sale[]; query: string }) 
       // An item taken off the bill on Raigam (nothing left) isn't loaded
       for (const l of s.lines.filter((x) => x.qty + x.freeQty > 0)) {
         const row =
-          map.get(l.sapCode) ?? { sapCode: l.sapCode, bills: 0, booked: 0, free: 0, loaded: 0, toLoad: 0, value: 0, inStock: 0, saleIds: new Set() };
+          map.get(l.sapCode) ??
+          { sapCode: l.sapCode, bills: 0, booked: 0, free: 0, loaded: 0, missing: 0, toLoad: 0, value: 0, inStock: 0, saleIds: new Set() };
         row.saleIds.add(s.id);
         // Booking = qty sold; free issue (and lines priced 0) go on the lorry too but aren't charged
         const free = l.freeQty + (l.unitPrice === 0 ? l.qty : 0);
         row.booked += l.qty;
         row.free += free;
         if (s.status === "Ordered") row.toLoad += l.qty + l.freeQty;
-        else row.loaded += l.qty + l.freeQty;
-        row.value += lineValue({ ...l, cancelQty: 0 });
+        else {
+          row.loaded += l.qty + l.freeQty - l.missingQty;
+          row.missing += l.missingQty;
+        }
+        row.value += lineValue({ ...l, cancelQty: 0, missingQty: 0 });
         map.set(l.sapCode, row);
       }
     }
@@ -99,16 +107,19 @@ export function LoadingList({ sales, query }: { sales: Sale[]; query: string }) 
     if (sort.key === "uom") return itemMap.get(r.sapCode)?.uom ?? "";
     return r[sort.key];
   };
+  const categoryOfRow = (r: ItemTotal) => categoryOf(itemMap.get(r.sapCode));
+  const rankOf = (r: ItemTotal) => ranks.get(categoryOfRow(r)) ?? ranks.size;
+  // Under their item categories (Raigam's sheet order); the chosen column sorts within each category
   const visible = rows
     .filter((r) => {
       const item = itemMap.get(r.sapCode);
-      return includesText([r.sapCode, item?.description, item?.packageDetails], query);
+      return includesText([r.sapCode, item?.description, item?.packageDetails, categoryOf(item)], query);
     })
     .sort((a, b) => {
       const x = sortValue(a);
       const y = sortValue(b);
       const order = typeof x === "number" && typeof y === "number" ? x - y : String(x).localeCompare(String(y));
-      return (sort.dir === "asc" ? order : -order) || a.sapCode.localeCompare(b.sapCode);
+      return rankOf(a) - rankOf(b) || (sort.dir === "asc" ? order : -order) || a.sapCode.localeCompare(b.sapCode);
     });
   const pager = usePagination(visible, [query, sort, sales.length]);
   const onPage = (i: number) => i >= pager.start && i < pager.start + pager.pageSize;
@@ -162,26 +173,44 @@ export function LoadingList({ sales, query }: { sales: Sale[]; query: string }) 
           {visible.map((r, i) => {
             const item = itemMap.get(r.sapCode);
             const isShort = r.toLoad > r.inStock;
+            const startsCategory = i === 0 || categoryOfRow(r) !== categoryOfRow(visible[i - 1]);
             return (
               // Rows on other pages are hidden on screen but still printed
-              <TR key={r.sapCode} className={cn(isShort && "bg-red-50/40", !onPage(i) && "hidden print:table-row")}>
-                <TD className="font-mono text-xs text-slate-900">{r.sapCode}</TD>
-                <TD className="whitespace-normal">
-                  <span className="block font-medium text-slate-900">{item?.description ?? "Deleted item"}</span>
-                  {item?.packageDetails && <span className="block text-xs text-slate-500">{item.packageDetails}</span>}
-                </TD>
-                <TD>{item?.uom ?? "—"}</TD>
-                <TD className="text-right tabular-nums">{formatQty(r.bills)}</TD>
-                <TD className="text-right font-semibold text-slate-900 tabular-nums">{formatQty(r.booked)}</TD>
-                <TD className="text-right tabular-nums">{r.free ? formatQty(r.free) : "—"}</TD>
-                <TD className="text-right tabular-nums">{r.loaded ? formatQty(r.loaded) : "—"}</TD>
-                <TD className={cn("text-right tabular-nums", r.toLoad > 0 && "font-semibold text-slate-900")}>{r.toLoad ? formatQty(r.toLoad) : "—"}</TD>
-                <TD className={cn("text-right tabular-nums", isShort && "font-semibold text-red-600")}>
-                  {formatQty(r.inStock)}
-                  {isShort && <span className="block text-xs font-medium">short {formatQty(r.toLoad - r.inStock)}</span>}
-                </TD>
-                <TD className="text-right tabular-nums">{formatMoney(r.value)}</TD>
-              </TR>
+              <Fragment key={r.sapCode}>
+                {startsCategory ? (
+                  <GroupRow colSpan={10} className={cn(!onPage(i) && "hidden print:table-row")}>
+                    {categoryOfRow(r)}
+                  </GroupRow>
+                ) : (
+                  // A page that starts inside a category repeats its heading on screen
+                  i === pager.start && (
+                    <GroupRow colSpan={10} className="print:hidden">
+                      {categoryOfRow(r)} <span className="font-normal text-slate-500 normal-case">(continued)</span>
+                    </GroupRow>
+                  )
+                )}
+                <TR className={cn(isShort && "bg-red-50/40", !onPage(i) && "hidden print:table-row")}>
+                  <TD className="font-mono text-xs text-slate-900">{r.sapCode}</TD>
+                  <TD className="whitespace-normal">
+                    <span className="block font-medium text-slate-900">{item?.description ?? "Deleted item"}</span>
+                    {item?.packageDetails && <span className="block text-xs text-slate-500">{item.packageDetails}</span>}
+                  </TD>
+                  <TD>{item?.uom ?? "—"}</TD>
+                  <TD className="text-right tabular-nums">{formatQty(r.bills)}</TD>
+                  <TD className="text-right font-semibold text-slate-900 tabular-nums">{formatQty(r.booked)}</TD>
+                  <TD className="text-right tabular-nums">{r.free ? formatQty(r.free) : "—"}</TD>
+                  <TD className="text-right tabular-nums">
+                    {r.loaded ? formatQty(r.loaded) : "—"}
+                    {r.missing > 0 && <span className="block text-xs font-medium text-amber-700">{formatQty(r.missing)} reduced</span>}
+                  </TD>
+                  <TD className={cn("text-right tabular-nums", r.toLoad > 0 && "font-semibold text-slate-900")}>{r.toLoad ? formatQty(r.toLoad) : "—"}</TD>
+                  <TD className={cn("text-right tabular-nums", isShort && "font-semibold text-red-600")}>
+                    {formatQty(r.inStock)}
+                    {isShort && <span className="block text-xs font-medium">short {formatQty(r.toLoad - r.inStock)}</span>}
+                  </TD>
+                  <TD className="text-right tabular-nums">{formatMoney(r.value)}</TD>
+                </TR>
+              </Fragment>
             );
           })}
         </TBody>
@@ -189,7 +218,8 @@ export function LoadingList({ sales, query }: { sales: Sale[]; query: string }) 
       <TableFooter pager={<Pagination pager={pager} />}>
         {formatQty(visible.length)} item{visible.length === 1 ? "" : "s"} · Booking {formatQty(sum((r) => r.booked))} units
         {sum((r) => r.free) > 0 && ` (${formatQty(sum((r) => r.free))} free)`} · Loading{" "}
-        {formatQty(sum((r) => r.loaded))} · To load {formatQty(sum((r) => r.toLoad))} ·{" "}
+        {formatQty(sum((r) => r.loaded))}
+        {sum((r) => r.missing) > 0 && ` (${formatQty(sum((r) => r.missing))} reduced)`} · To load {formatQty(sum((r) => r.toLoad))} ·{" "}
         <span className="font-medium text-slate-700">Booking value {formatMoney(sum((r) => r.value))}</span> (before bill discounts)
         {short.length > 0 && <span className="font-medium text-red-600"> · {short.length} short of stock</span>}
       </TableFooter>

@@ -1,15 +1,16 @@
 "use client";
 
 import { Pencil, Plus, Trash2 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Select } from "@/components/ui/form";
 import { Card, PageHeader, SearchInput, TableFooter, Toolbar } from "@/components/ui/layout";
 import { Pagination, usePagination } from "@/components/ui/pagination";
-import { EmptyRow, RowActions, Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
-import { useAppStore } from "@/lib/store";
+import { EmptyRow, GroupRow, RowActions, Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
+import { categoryOf, compareByCategory } from "@/lib/categories";
+import { useAppStore, useCategoryRanks } from "@/lib/store";
 import type { Item } from "@/lib/types";
 import { useDialog } from "@/lib/use-dialog";
 import { formatMoney, formatQty, includesText } from "@/lib/utils";
@@ -25,6 +26,8 @@ export function ItemsPage() {
   const deleteItem = useAppStore((s) => s.deleteItem);
   const [query, setQuery] = useState("");
   const [location, setLocation] = useState("");
+  const [category, setCategory] = useState("");
+  const ranks = useCategoryRanks();
   const form = useDialog<Item | "new">();
   const remove = useDialog<Item>();
 
@@ -35,13 +38,18 @@ export function ItemsPage() {
   }, [stock]);
 
   const notSet = items.filter((i) => !i.locationNumber).length;
-  const rows = items.filter(
-    (i) =>
-      (!location || i.locationNumber === (location === NOT_SET ? "" : location)) &&
-      includesText([i.sapCode, i.description, i.packageDetails, i.uom], query),
-  );
+  // Under their categories (Raigam's order sheet sections), in the sheet's order
+  const rows = items
+    .filter(
+      (i) =>
+        (!location || i.locationNumber === (location === NOT_SET ? "" : location)) &&
+        (!category || categoryOf(i) === category) &&
+        includesText([i.sapCode, i.description, i.packageDetails, i.uom, categoryOf(i)], query),
+    )
+    .sort((a, b) => compareByCategory(ranks, a, b));
+  const perCategory = Map.groupBy(rows, categoryOf);
 
-  const pager = usePagination(rows, [query, location]);
+  const pager = usePagination(rows, [query, location, category]);
 
   return (
     <>
@@ -67,6 +75,14 @@ export function ItemsPage() {
               </option>
             ))}
           </Select>
+          <Select value={category} onChange={(e) => setCategory(e.target.value)} className="h-9 sm:w-56" aria-label="Filter by category">
+            <option value="">All categories</option>
+            {[...ranks.keys()].map((name) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
+          </Select>
         </Toolbar>
         <Table>
           <THead>
@@ -87,46 +103,54 @@ export function ItemsPage() {
           </THead>
           <TBody>
             {rows.length === 0 && <EmptyRow colSpan={10}>No items found.</EmptyRow>}
-            {pager.pageRows.map((item) => (
-              <TR key={item.id}>
-                <TD className="font-mono text-xs font-medium text-slate-900">{item.sapCode}</TD>
-                <TD className="font-medium text-slate-900">{item.description}</TD>
-                <TD>{item.packageDetails || "—"}</TD>
-                <TD>{item.uom}</TD>
-                <TD className="whitespace-nowrap">{item.locationNumber || <span className="font-medium text-amber-700">Not set</span>}</TD>
-                <TD className="text-right tabular-nums">
-                  {item.costPrice > 0 ? formatMoney(item.costPrice) : <span className="font-medium text-amber-700">Not set</span>}
-                </TD>
-                <TD className="text-right tabular-nums">
-                  {formatMoney(item.wholesalePrice)}
-                  {item.costPrice > 0 && item.wholesalePrice > 0 && (
-                    <span className="block text-xs text-slate-500">
-                      {(((item.wholesalePrice - item.costPrice) / item.wholesalePrice) * 100).toFixed(1)}% margin
-                    </span>
-                  )}
-                </TD>
-                <TD className="text-right tabular-nums">
-                  {/* 0 = no retail price (e.g. bulk bags), not a free item */}
-                  {item.retailPrice > 0 ? formatMoney(item.retailPrice) : <span className="text-slate-400">—</span>}
-                </TD>
-                <TD className="text-right tabular-nums">{formatQty(availableBySap.get(item.sapCode) ?? 0)}</TD>
-                <TD>
-                  <RowActions>
-                    <Button variant="ghost" size="icon" onClick={() => form.open(item)} aria-label={`Edit ${item.sapCode}`}>
-                      <Pencil />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="hover:bg-red-50 hover:text-red-600"
-                      onClick={() => remove.open(item)}
-                      aria-label={`Delete ${item.sapCode}`}
-                    >
-                      <Trash2 />
-                    </Button>
-                  </RowActions>
-                </TD>
-              </TR>
+            {pager.pageRows.map((item, i) => (
+              <Fragment key={item.id}>
+                {/* A category heading where it starts, and on top of each page */}
+                {(i === 0 || categoryOf(item) !== categoryOf(pager.pageRows[i - 1])) && (
+                  <GroupRow colSpan={10}>
+                    {categoryOf(item)} <span className="font-normal text-slate-500 normal-case">· {perCategory.get(categoryOf(item))?.length ?? 0} items</span>
+                  </GroupRow>
+                )}
+                <TR>
+                  <TD className="font-mono text-xs font-medium text-slate-900">{item.sapCode}</TD>
+                  <TD className="font-medium text-slate-900">{item.description}</TD>
+                  <TD>{item.packageDetails || "—"}</TD>
+                  <TD>{item.uom}</TD>
+                  <TD className="whitespace-nowrap">{item.locationNumber || <span className="font-medium text-amber-700">Not set</span>}</TD>
+                  <TD className="text-right tabular-nums">
+                    {item.costPrice > 0 ? formatMoney(item.costPrice) : <span className="font-medium text-amber-700">Not set</span>}
+                  </TD>
+                  <TD className="text-right tabular-nums">
+                    {formatMoney(item.wholesalePrice)}
+                    {item.costPrice > 0 && item.wholesalePrice > 0 && (
+                      <span className="block text-xs text-slate-500">
+                        {(((item.wholesalePrice - item.costPrice) / item.wholesalePrice) * 100).toFixed(1)}% margin
+                      </span>
+                    )}
+                  </TD>
+                  <TD className="text-right tabular-nums">
+                    {/* 0 = no retail price (e.g. bulk bags), not a free item */}
+                    {item.retailPrice > 0 ? formatMoney(item.retailPrice) : <span className="text-slate-400">—</span>}
+                  </TD>
+                  <TD className="text-right tabular-nums">{formatQty(availableBySap.get(item.sapCode) ?? 0)}</TD>
+                  <TD>
+                    <RowActions>
+                      <Button variant="ghost" size="icon" onClick={() => form.open(item)} aria-label={`Edit ${item.sapCode}`}>
+                        <Pencil />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="hover:bg-red-50 hover:text-red-600"
+                        onClick={() => remove.open(item)}
+                        aria-label={`Delete ${item.sapCode}`}
+                      >
+                        <Trash2 />
+                      </Button>
+                    </RowActions>
+                  </TD>
+                </TR>
+              </Fragment>
             ))}
           </TBody>
         </Table>

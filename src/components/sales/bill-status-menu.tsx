@@ -109,7 +109,7 @@ export function BillStatusMenu({ sale, className }: { sale: Sale; className?: st
   const markLate = useAppStore((s) => s.markLate);
   const cancelSale = useAppStore((s) => s.cancelSale);
   const restoreSale = useAppStore((s) => s.restoreSale);
-  const [confirm, setConfirm] = useState<"actual" | "late" | "cancel" | null>(null);
+  const [confirm, setConfirm] = useState<Exclude<Choice, "restore"> | null>(null);
 
   const choices = choicesFor(sale);
   if (choices.length === 0) return null;

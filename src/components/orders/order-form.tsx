@@ -64,6 +64,9 @@ export function OrderForm({
     receivedDate: order?.receivedDate ?? "",
     receivedTime: order?.receivedTime ?? "",
     ...(order ? paymentOf(order) : NOT_PAID),
+    // Order sheet details, not edited here: kept as they are
+    territory: order?.territory ?? "",
+    requiredDate: order?.requiredDate ?? "",
   }));
 
   // Keys are stable (line id / SAP code), so building the starting lines twice gives the same rows

@@ -22,21 +22,39 @@ export function overdueDays(dueDate: string, due: number) {
 }
 const EPS_DUE = 0.004;
 
-type PricedLine = { qty: number; unitPrice: number; discountPct?: number; cancelQty?: number };
+type PricedLine = { qty: number; unitPrice: number; discountPct?: number; cancelQty?: number; missingQty?: number };
 type PricedLines = { lines: PricedLine[]; returns?: { qty: number; unitPrice: number }[] };
 
 const EPS = 0.004;
 
 // A bill, as on Raigam's invoice:
-//   item value   = (qty − cancelled) × unit price, less the item discount %   (free qty is never charged)
+//   item value   = charged qty × unit price, less the item discount %   (free qty is never charged)
+//   charged qty  = qty − missing at loading − cancelled at delivery
 //   items total  = sum of item values
 //   returns      = qty × unit price of goods the store gave back (good + market)
 //   gross value  = items total − returns          (saleSubtotal)
 //   bill discount = gross value × bill discount %  (stored on the bill in Rs.)
 //   invoice value = gross value − bill discount     (saleTotal)
 
+type QtyLine = { qty: number; freeQty?: number; missingQty?: number; cancelQty?: number };
+
+/** Units missing at loading that come off the charged qty (any more come off the free issue) */
+export const missingSold = (l: QtyLine) => Math.min(l.missingQty ?? 0, l.qty);
+
+/** Units charged: qty less what was missing at loading and cancelled at delivery */
+export const chargedQty = (l: QtyLine) => l.qty - missingSold(l) - (l.cancelQty ?? 0);
+
+/** A free issue item: another item given only free with the bill (e.g. Coffee 50g free with Coffee 100g), none charged */
+export const isFreeItem = (l: { qty: number; freeQty: number; takenOff: number }) => l.qty === 0 && l.takenOff === 0 && l.freeQty > 0;
+
+/** Every unit of the item reduced off the bill: kept on it as a removed (red) row */
+export const isRemoved = (l: QtyLine) => l.qty + (l.freeQty ?? 0) > 0 && (l.missingQty ?? 0) >= l.qty + (l.freeQty ?? 0);
+
+/** Free issue given: the free qty less missing units beyond the charged qty */
+export const freeGiven = (l: QtyLine) => (l.freeQty ?? 0) - Math.max(0, (l.missingQty ?? 0) - l.qty);
+
 export function lineValue(l: PricedLine) {
-  return round2((l.qty - (l.cancelQty ?? 0)) * l.unitPrice * (1 - (l.discountPct ?? 0) / 100));
+  return round2(chargedQty(l) * l.unitPrice * (1 - (l.discountPct ?? 0) / 100));
 }
 
 /** Bill price per unit less the item's wholesale price; 0 when the same (or no wholesale price is set to compare with) */
@@ -388,7 +406,7 @@ export function shopLedger(shop: Shop, sales: Sale[], payments: Payment[]): Ledg
   const rows: Omit<LedgerEntry, "balance">[] = [];
   // A bill is owed from the day it is delivered
   for (const s of sales.filter((x) => x.shopId === shop.id && isDelivered(x))) {
-    const qty = s.lines.reduce((n, l) => n + l.qty, 0);
+    const qty = s.lines.reduce((n, l) => n + chargedQty(l), 0);
     rows.push({
       key: s.id,
       date: s.deliveredDate,

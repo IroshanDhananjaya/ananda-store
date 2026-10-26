@@ -28,6 +28,10 @@ export const items = pgTable("items", {
   retailPrice: money().notNull(),
   // Where new loads of the item go; "" = not set yet. No foreign key: deleting a location in use is blocked in core.ts
   locationNumber: text().notNull().default(""),
+  /** Section on Raigam's goods order sheet (e.g. BLUE PACK SOYA); "" = not on the sheet */
+  sheetSection: text().notNull().default(""),
+  /** SN on Raigam's goods order sheet; 0 = none */
+  sheetNo: integer().notNull().default(0),
 }, () => [noApiAccess()]).enableRLS();
 
 export const locations = pgTable("locations", {
@@ -76,6 +80,10 @@ export const orders = pgTable("orders", {
   /** Raigam's "Discount % for Total Invoice", taken off the lines total (0 = none) */
   discountPercent: numeric({ precision: 5, scale: 2, mode: "number" }).notNull().default(0),
   postedToStock: boolean().notNull().default(false),
+  /** Raigam territory written on the goods order sheet */
+  territory: text().notNull().default(""),
+  /** Order sheet's "Required Date": when the goods are needed */
+  requiredDate: date({ mode: "string" }),
 }, () => [noApiAccess()]).enableRLS();
 
 export const orderItems = pgTable(
@@ -187,6 +195,12 @@ export const saleLines = pgTable(
     cancelQty: integer().notNull().default(0),
     /** Taken off the bill on Raigam before delivery (qty is what's left) */
     takenOff: integer().notNull().default(0),
+    /** Reduced on the bill before delivery (e.g. not in our store): not loaded, not charged */
+    missingQty: integer().notNull().default(0),
+    /** Why the item was reduced or changed */
+    note: text().notNull().default(""),
+    /** A free issue item given with another item on the bill: that item's SAP code */
+    freeWith: text().notNull().default(""),
     costPrice: money().notNull(),
   },
   (t) => [unique().on(t.saleId, t.kind, t.sapCode, t.locationNumber), noApiAccess()],

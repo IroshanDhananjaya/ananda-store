@@ -75,6 +75,17 @@ export function TD({ className, ...props }: ComponentProps<"td">) {
   return <td className={cn("px-3 py-3 whitespace-nowrap text-slate-700 first:pl-5 last:pr-5", className)} {...props} />;
 }
 
+/** A heading row inside a table body, e.g. the item category the rows below are under */
+export function GroupRow({ colSpan, className, children }: { colSpan: number; className?: string; children: ReactNode }) {
+  return (
+    <tr className={cn("bg-slate-100", className)}>
+      <td colSpan={colSpan} className="px-5 py-1.5 text-xs font-semibold tracking-wide text-brand-800 uppercase">
+        {children}
+      </td>
+    </tr>
+  );
+}
+
 export function EmptyRow({ colSpan, children }: { colSpan: number; children: ReactNode }) {
   return (
     <tr>

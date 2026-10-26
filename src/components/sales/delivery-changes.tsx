@@ -1,9 +1,9 @@
 "use client";
 
 import { Input, toNumber } from "@/components/ui/form";
-import { billDiscount, itemsTotal, returnsTotal, saleSubtotal } from "@/lib/ledger";
+import { billDiscount, itemsTotal, missingSold, returnsTotal, saleSubtotal } from "@/lib/ledger";
 import { useItemMap } from "@/lib/store";
-import type { Sale, SaleReturnInput } from "@/lib/types";
+import type { Sale, SaleLine, SaleReturnInput } from "@/lib/types";
 import { formatMoney, formatQty, round2 } from "@/lib/utils";
 import { blankReturn, pricedReturn, ReturnList, ReturnPanel, returnsInput, returnStarted, toReturnDrafts, type ReturnDraft } from "./return-items";
 
@@ -13,6 +13,9 @@ import { blankReturn, pricedReturn, ReturnList, ReturnPanel, returnsInput, retur
 export type DeliveryChangesValue = { cancels: Record<string, string>; returns: ReturnDraft[]; draft: ReturnDraft };
 /** Nothing cancelled yet; the return items entered with the bill, to check or change */
 export const changesFrom = (sale: Sale): DeliveryChangesValue => ({ cancels: {}, returns: toReturnDrafts(sale.returns), draft: blankReturn() });
+
+/** Charged units that reached the store (missing ones never did): the most the store can cancel */
+const cancellable = (l: SaleLine) => l.qty - missingSold(l);
 
 /** Bill totals once these changes are applied */
 export function totalsWith(sale: Sale, v: DeliveryChangesValue) {
@@ -29,8 +32,9 @@ export function totalsWith(sale: Sale, v: DeliveryChangesValue) {
 export function changesError(sale: Sale, v: DeliveryChangesValue): string | undefined {
   for (const l of sale.lines) {
     const c = v.cancels[l.id] ?? "";
-    if (c !== "" && (!Number.isInteger(Number(c)) || Number(c) < 0 || Number(c) > l.qty))
-      return `Cancelled qty for ${l.sapCode} must be a whole number from 0 to ${l.qty}.`;
+    const most = cancellable(l);
+    if (c !== "" && (!Number.isInteger(Number(c)) || Number(c) < 0 || Number(c) > most))
+      return `Cancelled qty for ${l.sapCode} must be a whole number from 0 to ${most}.`;
   }
   if (returnStarted(v.draft)) return "You started a return but didn't add it. Press Add return, or Clear.";
   if (totalsWith(sale, v).gross < 0) return "The returns are worth more than the items on this bill.";
@@ -57,8 +61,8 @@ export function DeliveryChanges({ sale, value, onChange }: { sale: Sale; value: 
           everything was taken.
         </p>
         <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
-          {/* Items taken off the bill on Raigam weren't delivered, so there's nothing to cancel */}
-          {sale.lines.filter((l) => l.qty > 0).map((l) => (
+          {/* Items taken off the bill on Raigam, free items and items missing at loading weren't delivered, so there's nothing to cancel */}
+          {sale.lines.filter((l) => cancellable(l) > 0).map((l) => (
             <li key={l.id} className="flex items-center gap-3 px-3 py-2">
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium text-slate-900">{itemMap.get(l.sapCode)?.description ?? l.sapCode}</p>
@@ -66,6 +70,7 @@ export function DeliveryChanges({ sale, value, onChange }: { sale: Sale; value: 
                   Booked {formatQty(l.qty)}
                   {l.freeQty ? ` + ${formatQty(l.freeQty)} free` : ""} · {formatMoney(l.unitPrice)}
                   {l.discountPct ? ` · ${l.discountPct}% off` : ""}
+                  {l.missingQty ? ` · ${formatQty(l.missingQty)} reduced` : ""}
                 </p>
               </div>
               <label className="flex items-center gap-2 text-xs text-slate-500">
@@ -73,7 +78,7 @@ export function DeliveryChanges({ sale, value, onChange }: { sale: Sale; value: 
                 <Input
                   type="number"
                   min={0}
-                  max={l.qty}
+                  max={cancellable(l)}
                   step={1}
                   inputMode="numeric"
                   value={value.cancels[l.id] ?? ""}

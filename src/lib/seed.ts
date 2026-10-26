@@ -5,16 +5,16 @@ import type { Expense, Item, Order, OrderItem, Payment, Route, Sale, SaleStatus,
 // Dummy data used on first load and by "Reset demo data".
 
 export const seedItems: Item[] = [
-  { id: "itm-01", sapCode: "RM-NOR-CUR-90G", description: "Normal Curry Soya - 90gr", packageDetails: "(90g x 50)", uom: "PKT", costPrice: 124, wholesalePrice: 147.9, retailPrice: 170, locationNumber: "LOC - 001" },
-  { id: "itm-02", sapCode: "RM-CHI-CUR-90G", description: "Chicken Curry Soya - 90gr", packageDetails: "(90g x 50)", uom: "PKT", costPrice: 128.5, wholesalePrice: 152, retailPrice: 175, locationNumber: "LOC - 001" },
-  { id: "itm-03", sapCode: "RM-DEV-SOY-90G", description: "Devilled Soya - 90gr", packageDetails: "(90g x 50)", uom: "PKT", costPrice: 130, wholesalePrice: 155.5, retailPrice: 180, locationNumber: "LOC - 001" },
-  { id: "itm-04", sapCode: "RM-MUT-SOY-90G", description: "Mutton Flavoured Soya - 90gr", packageDetails: "(90g x 50)", uom: "PKT", costPrice: 129.2, wholesalePrice: 152, retailPrice: 175, locationNumber: "LOC - 001" },
-  { id: "itm-05", sapCode: "RM-TAB-SAL-400G", description: "Table Salt - 400g", packageDetails: "(400g x 25)", uom: "PKT", costPrice: 54.5, wholesalePrice: 68, retailPrice: 80, locationNumber: "LOC - 002" },
-  { id: "itm-06", sapCode: "RM-IOD-SAL-1KG", description: "Iodized Crystal Salt - 1kg", packageDetails: "(1kg x 20)", uom: "PKT", costPrice: 77, wholesalePrice: 95, retailPrice: 110, locationNumber: "LOC - 002" },
-  { id: "itm-07", sapCode: "RM-CHI-NOO-400G", description: "Chicken Noodles - 400g", packageDetails: "(400g x 24)", uom: "PKT", costPrice: 251, wholesalePrice: 285, retailPrice: 330, locationNumber: "LOC - 003" },
-  { id: "itm-08", sapCode: "RM-CHI-POW-100G", description: "Chilli Powder - 100g", packageDetails: "(100g x 40)", uom: "PKT", costPrice: 176, wholesalePrice: 210, retailPrice: 245, locationNumber: "LOC - 004" },
-  { id: "itm-09", sapCode: "RM-CUR-POW-100G", description: "Curry Powder - 100g", packageDetails: "(100g x 40)", uom: "PKT", costPrice: 166, wholesalePrice: 195, retailPrice: 230, locationNumber: "LOC - 004" },
-  { id: "itm-10", sapCode: "RM-SOY-SAU-350ML", description: "Soya Sauce - 350ml", packageDetails: "(350ml x 24)", uom: "BTL", costPrice: 198, wholesalePrice: 240, retailPrice: 280, locationNumber: "LOC - 005" },
+  { id: "itm-01", sapCode: "RM-NOR-CUR-90G", description: "Normal Curry Soya - 90gr", packageDetails: "(90g x 50)", uom: "PKT", costPrice: 124, wholesalePrice: 147.9, retailPrice: 170, locationNumber: "LOC - 001", sheetSection: "", sheetNo: 0 },
+  { id: "itm-02", sapCode: "RM-CHI-CUR-90G", description: "Chicken Curry Soya - 90gr", packageDetails: "(90g x 50)", uom: "PKT", costPrice: 128.5, wholesalePrice: 152, retailPrice: 175, locationNumber: "LOC - 001", sheetSection: "", sheetNo: 0 },
+  { id: "itm-03", sapCode: "RM-DEV-SOY-90G", description: "Devilled Soya - 90gr", packageDetails: "(90g x 50)", uom: "PKT", costPrice: 130, wholesalePrice: 155.5, retailPrice: 180, locationNumber: "LOC - 001", sheetSection: "", sheetNo: 0 },
+  { id: "itm-04", sapCode: "RM-MUT-SOY-90G", description: "Mutton Flavoured Soya - 90gr", packageDetails: "(90g x 50)", uom: "PKT", costPrice: 129.2, wholesalePrice: 152, retailPrice: 175, locationNumber: "LOC - 001", sheetSection: "", sheetNo: 0 },
+  { id: "itm-05", sapCode: "RM-TAB-SAL-400G", description: "Table Salt - 400g", packageDetails: "(400g x 25)", uom: "PKT", costPrice: 54.5, wholesalePrice: 68, retailPrice: 80, locationNumber: "LOC - 002", sheetSection: "", sheetNo: 0 },
+  { id: "itm-06", sapCode: "RM-IOD-SAL-1KG", description: "Iodized Crystal Salt - 1kg", packageDetails: "(1kg x 20)", uom: "PKT", costPrice: 77, wholesalePrice: 95, retailPrice: 110, locationNumber: "LOC - 002", sheetSection: "", sheetNo: 0 },
+  { id: "itm-07", sapCode: "RM-CHI-NOO-400G", description: "Chicken Noodles - 400g", packageDetails: "(400g x 24)", uom: "PKT", costPrice: 251, wholesalePrice: 285, retailPrice: 330, locationNumber: "LOC - 003", sheetSection: "", sheetNo: 0 },
+  { id: "itm-08", sapCode: "RM-CHI-POW-100G", description: "Chilli Powder - 100g", packageDetails: "(100g x 40)", uom: "PKT", costPrice: 176, wholesalePrice: 210, retailPrice: 245, locationNumber: "LOC - 004", sheetSection: "", sheetNo: 0 },
+  { id: "itm-09", sapCode: "RM-CUR-POW-100G", description: "Curry Powder - 100g", packageDetails: "(100g x 40)", uom: "PKT", costPrice: 166, wholesalePrice: 195, retailPrice: 230, locationNumber: "LOC - 004", sheetSection: "", sheetNo: 0 },
+  { id: "itm-10", sapCode: "RM-SOY-SAU-350ML", description: "Soya Sauce - 350ml", packageDetails: "(350ml x 24)", uom: "BTL", costPrice: 198, wholesalePrice: 240, retailPrice: 280, locationNumber: "LOC - 005", sheetSection: "", sheetNo: 0 },
 ];
 
 export const seedLocations: StoreLocation[] = [
@@ -93,12 +93,12 @@ function billFor(orderId: string) {
 }
 
 export const seedOrders: Order[] = [
-  { id: "ord-01", orderId: "ORD - 0001", invoiceNumber: "INV-RG-24561", poNumber: "PO-4500231", orderDate: "2026-10-02", receivedDate: "2026-10-04", receivedTime: "10:15", paymentMethod: "Cheque", paidDate: "2026-10-04", chequeNumber: "100231", chequeDepositDate: "2026-10-31", paymentReference: "", totalBillAmount: billFor("ORD - 0001"), discountPercent: 0, postedToStock: true },
-  { id: "ord-02", orderId: "ORD - 0002", invoiceNumber: "INV-RG-24610", poNumber: "PO-4500232", orderDate: "2026-10-07", receivedDate: "2026-10-09", receivedTime: "14:40", paymentMethod: "Cheque", paidDate: "2026-10-09", chequeNumber: "100245", chequeDepositDate: "2026-11-05", paymentReference: "", totalBillAmount: billFor("ORD - 0002"), discountPercent: 0, postedToStock: true },
-  { id: "ord-03", orderId: "ORD - 0003", invoiceNumber: "INV-RG-24702", poNumber: "PO-4500233", orderDate: "2026-10-12", receivedDate: "2026-10-15", receivedTime: "09:30", paymentMethod: "Cheque", paidDate: "2026-10-15", chequeNumber: "100259", chequeDepositDate: "2026-11-12", paymentReference: "", totalBillAmount: billFor("ORD - 0003"), discountPercent: 0, postedToStock: false },
-  { id: "ord-04", orderId: "ORD - 0004", invoiceNumber: "INV-RG-24788", poNumber: "PO-4500234", orderDate: "2026-10-17", receivedDate: "2026-10-20", receivedTime: "16:05", paymentMethod: "Cheque", paidDate: "2026-10-20", chequeNumber: "100266", chequeDepositDate: "2026-11-17", paymentReference: "", totalBillAmount: billFor("ORD - 0004"), discountPercent: 0, postedToStock: false },
-  { id: "ord-05", orderId: "ORD - 0005", invoiceNumber: "", poNumber: "PO-4500235", orderDate: "2026-10-20", receivedDate: "", receivedTime: "", paymentMethod: "", paidDate: "", chequeNumber: "", chequeDepositDate: "", paymentReference: "", totalBillAmount: billFor("ORD - 0005"), discountPercent: 0, postedToStock: false },
-  { id: "ord-06", orderId: "ORD - 0006", invoiceNumber: "", poNumber: "PO-4500236", orderDate: "2026-10-21", receivedDate: "", receivedTime: "", paymentMethod: "", paidDate: "", chequeNumber: "", chequeDepositDate: "", paymentReference: "", totalBillAmount: billFor("ORD - 0006"), discountPercent: 0, postedToStock: false },
+  { id: "ord-01", orderId: "ORD - 0001", invoiceNumber: "INV-RG-24561", poNumber: "PO-4500231", orderDate: "2026-10-02", receivedDate: "2026-10-04", receivedTime: "10:15", paymentMethod: "Cheque", paidDate: "2026-10-04", chequeNumber: "100231", chequeDepositDate: "2026-10-31", paymentReference: "", totalBillAmount: billFor("ORD - 0001"), discountPercent: 0, postedToStock: true, territory: "", requiredDate: "" },
+  { id: "ord-02", orderId: "ORD - 0002", invoiceNumber: "INV-RG-24610", poNumber: "PO-4500232", orderDate: "2026-10-07", receivedDate: "2026-10-09", receivedTime: "14:40", paymentMethod: "Cheque", paidDate: "2026-10-09", chequeNumber: "100245", chequeDepositDate: "2026-11-05", paymentReference: "", totalBillAmount: billFor("ORD - 0002"), discountPercent: 0, postedToStock: true, territory: "", requiredDate: "" },
+  { id: "ord-03", orderId: "ORD - 0003", invoiceNumber: "INV-RG-24702", poNumber: "PO-4500233", orderDate: "2026-10-12", receivedDate: "2026-10-15", receivedTime: "09:30", paymentMethod: "Cheque", paidDate: "2026-10-15", chequeNumber: "100259", chequeDepositDate: "2026-11-12", paymentReference: "", totalBillAmount: billFor("ORD - 0003"), discountPercent: 0, postedToStock: false, territory: "", requiredDate: "" },
+  { id: "ord-04", orderId: "ORD - 0004", invoiceNumber: "INV-RG-24788", poNumber: "PO-4500234", orderDate: "2026-10-17", receivedDate: "2026-10-20", receivedTime: "16:05", paymentMethod: "Cheque", paidDate: "2026-10-20", chequeNumber: "100266", chequeDepositDate: "2026-11-17", paymentReference: "", totalBillAmount: billFor("ORD - 0004"), discountPercent: 0, postedToStock: false, territory: "", requiredDate: "" },
+  { id: "ord-05", orderId: "ORD - 0005", invoiceNumber: "", poNumber: "PO-4500235", orderDate: "2026-10-20", receivedDate: "", receivedTime: "", paymentMethod: "", paidDate: "", chequeNumber: "", chequeDepositDate: "", paymentReference: "", totalBillAmount: billFor("ORD - 0005"), discountPercent: 0, postedToStock: false, territory: "", requiredDate: "" },
+  { id: "ord-06", orderId: "ORD - 0006", invoiceNumber: "", poNumber: "PO-4500236", orderDate: "2026-10-21", receivedDate: "", receivedTime: "", paymentMethod: "", paidDate: "", chequeNumber: "", chequeDepositDate: "", paymentReference: "", totalBillAmount: billFor("ORD - 0006"), discountPercent: 0, postedToStock: false, territory: "", requiredDate: "" },
 ];
 
 // ---------- Sales side ----------
@@ -217,6 +217,9 @@ export const seedSales: Sale[] = [...historyBills, ...octoberBills].map((b, i): 
       discountPct: 0,
       cancelQty: 0,
       takenOff: 0,
+      missingQty: 0,
+      note: "",
+      freeWith: "",
       costPrice: cost(sapCode),
     })),
     returns: [],

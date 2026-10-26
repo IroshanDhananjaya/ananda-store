@@ -81,12 +81,13 @@ async function clear() {
 /**
  * One item in an item list file (e.g. typed up from a photo of a Raigam price list).
  * New SAP codes need every field except locationNumber (the stock location new loads
- * go to; left out = not set); for an item already in the database, fields left out
- * keep their current value.
+ * go to; left out = not set) and sheetSection / sheetNo (its section and SN on Raigam's
+ * goods order sheet; left out = not on the sheet); for an item already in the database,
+ * fields left out keep their current value.
  */
 type ItemRow = Partial<ItemInput> & { sapCode: string };
 
-const ITEM_FIELDS = ["description", "packageDetails", "uom", "costPrice", "wholesalePrice", "retailPrice", "locationNumber"] as const;
+const ITEM_FIELDS = ["description", "packageDetails", "uom", "costPrice", "wholesalePrice", "retailPrice", "locationNumber", "sheetSection", "sheetNo"] as const;
 const PRICE_FIELDS = ["costPrice", "wholesalePrice", "retailPrice"] as const;
 
 /** Finds a location by number, so "loc-001" finds "LOC - 001" */
@@ -97,7 +98,7 @@ function locationFinder(locations: StoreLocation[]) {
 
 /** The item as the Items form would save it, or what's wrong with it */
 function checkItemRow(row: ItemRow, current: ItemInput | undefined, findLocation: (v: unknown) => string | undefined): ItemInput | string {
-  const merged = { packageDetails: "", locationNumber: "", ...current, ...row };
+  const merged = { packageDetails: "", locationNumber: "", sheetSection: "", sheetNo: 0, ...current, ...row };
   const locationNumber = merged.locationNumber ? findLocation(merged.locationNumber) : "";
   if (locationNumber === undefined) return `location "${merged.locationNumber}" doesn't exist`;
   const item: ItemInput = {
@@ -109,11 +110,14 @@ function checkItemRow(row: ItemRow, current: ItemInput | undefined, findLocation
     wholesalePrice: round2(Number(merged.wholesalePrice)),
     retailPrice: round2(Number(merged.retailPrice)),
     locationNumber,
+    sheetSection: String(merged.sheetSection ?? "").trim().toUpperCase(),
+    sheetNo: Number(merged.sheetNo ?? 0),
   };
   if (!item.description) return "description is missing";
   if (!item.uom) return "UOM is missing";
   const badPrice = PRICE_FIELDS.find((f) => String(merged[f] ?? "").trim() === "" || !Number.isFinite(item[f]) || item[f] < 0);
   if (badPrice) return `${badPrice} must be a number, 0 or more`;
+  if (!Number.isInteger(item.sheetNo) || item.sheetNo < 0) return "sheetNo must be a whole number, 0 or more";
   return item;
 }
 

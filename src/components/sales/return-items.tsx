@@ -1,13 +1,13 @@
 "use client";
 
-import { Plus, Trash2 } from "lucide-react";
+import { Pencil, Plus, Trash2 } from "lucide-react";
 import { useId, useState, type KeyboardEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { Field, Input, toNumber } from "@/components/ui/form";
 import { FilterTabs } from "@/components/ui/layout";
 import { SearchSelect } from "@/components/ui/search-select";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
-import { useAppStore, useItemMap } from "@/lib/store";
+import { useItemMap, useItemPickOptions } from "@/lib/store";
 import { RETURN_KINDS, type ReturnKind, type SaleReturn, type SaleReturnInput } from "@/lib/types";
 import { cn, formatMoney, formatQty, newId, round2 } from "@/lib/utils";
 
@@ -36,7 +36,7 @@ export const pricedReturn = (r: ReturnDraft) => ({ qty: toNumber(r.qty), unitPri
 
 const returnValue = (r: ReturnDraft) => round2(toNumber(r.qty) * toNumber(r.unitPrice));
 
-const KIND_HINT: Record<ReturnKind, string> = {
+export const RETURN_KIND_HINT: Record<ReturnKind, string> = {
   Good: "Good condition. Kept for Raigam, not put back in stock.",
   Market: "Damaged or expired. Kept for Raigam, not put back in stock.",
 };
@@ -83,6 +83,8 @@ export function ReturnPanel({
   priceOf,
   wide = false,
   idPrefix,
+  editingKey = null,
+  onEditEnd,
   className,
 }: {
   /** Returns already on the bill (an item goes on one line per type) */
@@ -97,11 +99,16 @@ export function ReturnPanel({
   wide?: boolean;
   /** Start of the fields' ids, so the page can focus them (the item box is `${idPrefix}Item`) */
   idPrefix?: string;
+  /** The return (by key) loaded into the box to change: Add becomes Update and puts it back in its place */
+  editingKey?: string | null;
+  /** The return being changed was updated, or the change was dropped */
+  onEditEnd?: () => void;
   className?: string;
 }) {
   const autoId = useId();
   const id = idPrefix ?? autoId;
-  const items = useAppStore((s) => s.items);
+  // Items to pick from, grouped by category
+  const itemOptions = useItemPickOptions();
   const [error, setError] = useState<string>();
   const spot = wide ? WIDE : COMPACT;
 
@@ -121,12 +128,22 @@ export function ReturnPanel({
     if (!draft.sapCode) err = "Pick the returned item.";
     else if (!Number.isInteger(qty) || qty <= 0) err = "Enter the returned qty (a whole number).";
     else if (draft.unitPrice === "" || toNumber(draft.unitPrice) < 0) err = "Enter the price to credit.";
-    else if (returns.some((r) => r.kind === draft.kind && r.sapCode === draft.sapCode))
-      err = "That item is already in the returns. Remove it and add it again with the full qty.";
+    else if (returns.some((r) => r.key !== editingKey && r.kind === draft.kind && r.sapCode === draft.sapCode))
+      err = editingKey
+        ? "That item is already in the returns as this type. Change that one instead."
+        : "That item is already in the returns. Change it in the list instead (✏️).";
     setError(err);
     if (err) return;
-    onChange([...returns, draft], blankReturn(draft.kind));
+    // Changing a return puts it back in its place; a new one goes at the end
+    onChange(editingKey ? returns.map((r) => (r.key === editingKey ? draft : r)) : [...returns, draft], blankReturn(draft.kind));
+    onEditEnd?.();
     focusField(`${id}Item`);
+  }
+
+  function clear() {
+    onChange(returns, blankReturn(draft.kind));
+    setError(undefined);
+    onEditEnd?.();
   }
 
   // Enter in a box adds the return instead of saving the whole form (the item search handles its own Enter)
@@ -138,7 +155,7 @@ export function ReturnPanel({
 
   return (
     <div onKeyDown={onKeyDown} className={cn(spot.grid, className)}>
-      <Field label="Type" className={spot.kind} hint={KIND_HINT[draft.kind]}>
+      <Field label="Type" className={spot.kind} hint={RETURN_KIND_HINT[draft.kind]}>
         <FilterTabs<ReturnKind> value={draft.kind} onChange={(kind) => set({ kind })} options={RETURN_KINDS.map((k) => ({ value: k, label: `${k} return` }))} />
       </Field>
       <Field label="Item" htmlFor={`${id}Item`} className={spot.item}>
@@ -146,7 +163,7 @@ export function ReturnPanel({
           id={`${id}Item`}
           value={draft.sapCode}
           onChange={pickItem}
-          options={[...items].sort((a, b) => a.description.localeCompare(b.description)).map((i) => ({ value: i.sapCode, label: i.description, description: i.sapCode }))}
+          options={itemOptions}
           placeholder="Search the returned item…"
           showDescription
         />
@@ -180,20 +197,21 @@ export function ReturnPanel({
           {error ?? (draft.qty && draft.unitPrice ? `Credit ${formatMoney(returnValue(draft))}` : "")}
         </p>
         <div className="flex shrink-0 gap-1">
-          {returnStarted(draft) && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => {
-                onChange(returns, blankReturn(draft.kind));
-                setError(undefined);
-              }}
-            >
-              Clear
+          {(editingKey || returnStarted(draft)) && (
+            <Button variant="ghost" size="sm" onClick={clear}>
+              {editingKey ? "Cancel edit" : "Clear"}
             </Button>
           )}
           <Button variant="secondary" size="sm" onClick={add}>
-            <Plus /> Add return
+            {editingKey ? (
+              <>
+                <Pencil /> Update return
+              </>
+            ) : (
+              <>
+                <Plus /> Add return
+              </>
+            )}
           </Button>
         </div>
       </div>
@@ -232,8 +250,18 @@ export function ReturnList({ returns, onRemove }: { returns: ReturnDraft[]; onRe
   );
 }
 
-/** Returns on the bill form, as a table like its items */
-export function ReturnTable({ returns, onRemove }: { returns: ReturnDraft[]; onRemove: (key: string) => void }) {
+/** Returns on the bill form, as a table like its items; `onEdit` loads one back into the box to change it */
+export function ReturnTable({
+  returns,
+  onRemove,
+  onEdit,
+  editingKey,
+}: {
+  returns: ReturnDraft[];
+  onRemove: (key: string) => void;
+  onEdit?: (key: string) => void;
+  editingKey?: string | null;
+}) {
   const itemMap = useItemMap();
   if (returns.length === 0) return null;
   return (
@@ -246,14 +274,14 @@ export function ReturnTable({ returns, onRemove }: { returns: ReturnDraft[]; onR
           <TH className="text-right">Qty</TH>
           <TH className="text-right">Unit Price</TH>
           <TH className="text-right">Value</TH>
-          <TH className="w-16">
+          <TH className="w-24">
             <span className="sr-only">Actions</span>
           </TH>
         </tr>
       </THead>
       <TBody>
         {returns.map((r, index) => (
-          <TR key={r.key}>
+          <TR key={r.key} className={cn(r.key === editingKey && "bg-amber-50/70")}>
             <TD className="text-slate-400 tabular-nums">{index + 1}</TD>
             <TD>
               <ReturnKindBadge kind={r.kind} />
@@ -266,7 +294,12 @@ export function ReturnTable({ returns, onRemove }: { returns: ReturnDraft[]; onR
             <TD className="text-right tabular-nums">{formatMoney(toNumber(r.unitPrice))}</TD>
             <TD className="text-right font-medium text-red-600 tabular-nums">− {formatMoney(returnValue(r))}</TD>
             <TD>
-              <div className="flex items-center justify-end">
+              <div className="flex items-center justify-end gap-1">
+                {onEdit && (
+                  <Button variant="ghost" size="icon" onClick={() => onEdit(r.key)} aria-label={`Edit return ${index + 1}`} title="Edit">
+                    <Pencil />
+                  </Button>
+                )}
                 <Button
                   variant="ghost"
                   size="icon"

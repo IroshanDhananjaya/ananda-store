@@ -8,36 +8,99 @@ import { Button, buttonClass } from "@/components/ui/button";
 import { ShopFormDialog } from "@/components/shops/shop-form-dialog";
 import { Field, Input, ReadOnlyValue, toNumber } from "@/components/ui/form";
 import { SearchSelect } from "@/components/ui/search-select";
-import { Card, CardHeader } from "@/components/ui/layout";
+import { Card, CardHeader, FilterTabs } from "@/components/ui/layout";
 import { EmptyRow, Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
-import { amountOwed, billDiscount, itemsTotal, lineValue, returnsTotal, saleSubtotal, saleTotal, stockIsOut } from "@/lib/ledger";
-import { useAppStore, useItemMap, useRouteMap, useSaleDues, useShopBalances } from "@/lib/store";
-import type { Sale, SaleInput, Shop } from "@/lib/types";
+import {
+  amountOwed,
+  billDiscount,
+  chargedQty,
+  isFreeItem,
+  isRemoved,
+  itemsTotal,
+  lineValue,
+  missingSold,
+  returnsTotal,
+  saleSubtotal,
+  saleTotal,
+  stockIsOut,
+} from "@/lib/ledger";
+import { useAppStore, useItemMap, useItemPickOptions, useRouteMap, useSaleDues, useShopBalances } from "@/lib/store";
+import type { Sale, SaleInput, SaleLine, Shop } from "@/lib/types";
 import { addDays, cn, formatDate, formatMoney, formatQty, newId, nextCode, round2, todayISO } from "@/lib/utils";
 import { AddPaymentButton, BillPaymentDialog, BillPaymentList, type BillPaymentRow } from "./bill-payment-dialog";
 import { blankReturn, pricedReturn, ReturnPanel, returnsInput, returnStarted, ReturnTable, toReturnDrafts, type ReturnDraft } from "./return-items";
 
 /**
  * One bill line while editing; cancelQty only comes from a delivered bill (entered at delivery, not here),
- * takenOff only from Raigam (synced: booked there but taken off the bill; qty may then be 0)
+ * missingQty from a loaded one (entered at loading), takenOff only from Raigam (synced: booked there but
+ * taken off the bill; qty may then be 0). Qty is also 0 for a free item (only free issue).
  */
-type LineDraft = { key: string; stockKey: string; qty: string; freeQty: string; unitPrice: string; discountPct: string; cancelQty: number; takenOff: number };
+type LineDraft = {
+  key: string;
+  stockKey: string;
+  qty: string;
+  freeQty: string;
+  unitPrice: string;
+  discountPct: string;
+  cancelQty: number;
+  missingQty: number;
+  takenOff: number;
+  /** A free issue item given with another item on the bill: that item's SAP code ("" = not linked) */
+  freeWith: string;
+};
 type DraftErrors = Partial<Record<"stockKey" | "qty" | "freeQty" | "unitPrice" | "discountPct", string>>;
+/** The item box's free issue: more of the same item, or another item given with it (its own linked line) */
+type FreeKind = "same" | "other";
 
 const stockKeyOf = (sapCode: string, locationNumber: string) => `${sapCode}|${locationNumber}`;
 const splitKey = (key: string) => {
   const [sapCode = "", locationNumber = ""] = key.split("|");
   return { sapCode, locationNumber };
 };
-const emptyDraft = (): LineDraft => ({ key: newId(), stockKey: "", qty: "", freeQty: "0", unitPrice: "", discountPct: "0", cancelQty: 0, takenOff: 0 });
+const emptyDraft = (): LineDraft => ({
+  key: newId(),
+  stockKey: "",
+  qty: "",
+  freeQty: "0",
+  unitPrice: "",
+  discountPct: "0",
+  cancelQty: 0,
+  missingQty: 0,
+  takenOff: 0,
+  freeWith: "",
+});
 const isWhole = (v: string) => v !== "" && Number.isInteger(Number(v)) && Number(v) >= 0;
 /** A line as numbers, for the bill maths in ledger.ts */
-const priced = (l: LineDraft) => ({ qty: toNumber(l.qty), unitPrice: toNumber(l.unitPrice), discountPct: toNumber(l.discountPct), cancelQty: l.cancelQty });
-/** Units a line takes out of stock: sold + free, less what was cancelled at delivery */
-const unitsOut = (l: LineDraft) => toNumber(l.qty) + toNumber(l.freeQty) - l.cancelQty;
+const priced = (l: LineDraft) => ({
+  qty: toNumber(l.qty),
+  unitPrice: toNumber(l.unitPrice),
+  discountPct: toNumber(l.discountPct),
+  cancelQty: l.cancelQty,
+  missingQty: l.missingQty,
+});
+/** Units a line takes out of stock: sold + free, less what's missing in the store and was cancelled at delivery */
+const unitsOut = (l: LineDraft) => toNumber(l.qty) + toNumber(l.freeQty) - l.missingQty - l.cancelQty;
+/** A free issue item: another item given only free (qty 0), listed under Free issue items */
+const isFreeLine = (l: LineDraft) => isFreeItem({ qty: toNumber(l.qty), freeQty: toNumber(l.freeQty), takenOff: l.takenOff });
+/** The free issue box: an item and its free qty */
+const emptyFree = { stockKey: "", freeQty: "" };
 
 /** Focus a field once React has drawn it */
 const focusField = (id: string) => requestAnimationFrame(() => document.getElementById(id)?.focus());
+
+/** What the bill's page set on a saved item (kept when the form is saved): removed, its note */
+function SavedLineNotes({ line }: { line?: SaleLine }) {
+  if (!line) return null;
+  return (
+    <>
+      {isRemoved(line) && <span className="block text-xs font-semibold text-red-600">Removed from the bill</span>}
+      {line.note && <span className="block text-xs text-slate-600 italic">Note: {line.note}</span>}
+    </>
+  );
+}
+
+/** The free issue item given with an item (its free line linked to it), if any */
+const linkedFree = (lines: LineDraft[], sapCode: string) => (sapCode ? lines.find((l) => l.freeWith === sapCode && isFreeLine(l)) : undefined);
 
 export function SaleForm({
   sale,
@@ -53,7 +116,6 @@ export function SaleForm({
   const shops = useAppStore((s) => s.shops);
   const routes = useAppStore((s) => s.routes);
   const stock = useAppStore((s) => s.stock);
-  const items = useAppStore((s) => s.items);
   const locations = useAppStore((s) => s.locations);
   const sales = useAppStore((s) => s.sales);
   const createSale = useAppStore((s) => s.createSale);
@@ -87,17 +149,30 @@ export function SaleForm({
       unitPrice: String(l.unitPrice),
       discountPct: String(l.discountPct),
       cancelQty: l.cancelQty,
+      missingQty: l.missingQty,
       takenOff: l.takenOff,
+      freeWith: l.freeWith,
     })),
   );
   const [draft, setDraft] = useState<LineDraft>(emptyDraft);
   const [editingKey, setEditingKey] = useState<string | null>(null);
+  // The item box's free issue: of the same item (the draft's free qty), or another item given with it (that qty)
+  const [draftFreeKind, setDraftFreeKind] = useState<FreeKind>("same");
+  const [draftOther, setDraftOther] = useState("");
+  // The item box as it was when an item was loaded into it, to tell if it was changed
+  const [editStart, setEditStart] = useState("");
   const [draftErrors, setDraftErrors] = useState<DraftErrors>({});
   const [discountPercent, setDiscountPercent] = useState(sale?.discountPercent ? String(sale.discountPercent) : "");
   // Return items (good / market): the box opens when there are some, or when asked for
   const [returns, setReturns] = useState<ReturnDraft[]>(() => toReturnDrafts(sale?.returns ?? []));
   const [returnDraft, setReturnDraft] = useState<ReturnDraft>(() => blankReturn());
   const [showReturns, setShowReturns] = useState(() => (sale?.returns.length ?? 0) > 0);
+  // The return loaded into the box to change (its key), if any
+  const [editingReturn, setEditingReturn] = useState<string | null>(null);
+  // Free issue items (other items given only free): their own box, open when there are some or when asked for
+  const [showFree, setShowFree] = useState(() => (sale?.lines ?? []).some(isFreeItem));
+  const [freeDraft, setFreeDraft] = useState(emptyFree);
+  const [freeError, setFreeError] = useState<string>();
   // Name typed in the Store box for a store that isn't in the list yet (opens Add store)
   const [newStoreName, setNewStoreName] = useState<string | null>(null);
   const [formError, setFormError] = useState<string>();
@@ -114,17 +189,14 @@ export function SaleForm({
     if (stockOut) {
       for (const l of sale?.lines ?? []) {
         const k = stockKeyOf(l.sapCode, l.locationNumber);
-        map.set(k, (map.get(k) ?? 0) + l.qty + l.freeQty - (delivered ? l.cancelQty : 0));
+        map.set(k, (map.get(k) ?? 0) + l.qty + l.freeQty - l.missingQty - (delivered ? l.cancelQty : 0));
       }
     }
     return map;
   }, [stock, sale, stockOut, delivered]);
 
-  // The item list shows the name (bold) and code only; each line's stock location comes from the item (locationFor)
-  const itemOptions = useMemo(
-    () => [...items].sort((a, b) => a.description.localeCompare(b.description)).map((i) => ({ value: i.sapCode, label: i.description, description: i.sapCode })),
-    [items],
-  );
+  // The item list shows the name (bold) and code only, grouped by category; each line's stock location comes from the item (locationFor)
+  const itemOptions = useItemPickOptions();
   const reps = useMemo(() => [...new Set(routes.map((r) => r.salesRep).filter(Boolean))], [routes]);
 
   const shop: Shop | undefined = shops.find((s) => s.id === shopId);
@@ -181,6 +253,13 @@ export function SaleForm({
     return line && line.unitPrice !== "" ? toNumber(line.unitPrice) : itemMap.get(sapCode)?.wholesalePrice;
   }
 
+  /** Taken off changed: the booked qty stays, so what's taken off comes out of the qty (or goes back into it) */
+  function changeDraftTakenOff(value: string) {
+    const taken = value === "" ? 0 : Math.max(0, Math.trunc(Number(value)) || 0);
+    const qty = isWhole(draft.qty) ? String(Math.max(0, toNumber(draft.qty) + draft.takenOff - taken)) : draft.qty;
+    setDraftField({ takenOff: taken, qty });
+  }
+
   function setDraftField(patch: Partial<LineDraft>) {
     setDraft((d) => ({ ...d, ...patch }));
     setDraftErrors({});
@@ -209,9 +288,20 @@ export function SaleForm({
     const { sapCode, locationNumber } = splitKey(d.stockKey);
     if (!sapCode) e.stockKey = "Pick an item.";
     else if (!locationNumber) e.stockKey = "This item has no stock location yet. Set it on the Items page.";
-    else if (lines.some((l) => splitKey(l.stockKey).sapCode === sapCode && l.key !== d.key)) e.stockKey = "Already on the bill below. Edit it there.";
-    if (!isWhole(d.qty) || (toNumber(d.qty) === 0 && !d.takenOff)) e.qty = "A whole number above 0.";
-    else if (d.cancelQty > toNumber(d.qty)) e.qty = `${d.cancelQty} were cancelled at delivery, so at least ${d.cancelQty}.`;
+    else {
+      const onBill = lines.find((l) => splitKey(l.stockKey).sapCode === sapCode && l.key !== d.key);
+      if (onBill)
+        e.stockKey = isFreeLine(onBill)
+          ? "It's in the free issue items below. Remove it there, then add it here with its Free Issue."
+          : "Already on the bill below. Edit it there.";
+    }
+    const free = isWhole(d.freeQty) ? toNumber(d.freeQty) : 0;
+    // Qty 0 only for an item taken off on Raigam; an item given only free goes under Free issue items
+    if (!isWhole(d.qty) || (toNumber(d.qty) === 0 && !d.takenOff))
+      e.qty = toNumber(d.qty) === 0 && free > 0 ? "Only free? Add it under Free issue items below." : "A whole number above 0.";
+    else if (d.missingQty > toNumber(d.qty) + free) e.qty = `${d.missingQty} were reduced on the bill, so qty + free can't be less.`;
+    else if (d.cancelQty > toNumber(d.qty) - missingSold(priced(d)))
+      e.qty = `${d.cancelQty} were cancelled at delivery, so at least ${d.cancelQty + Math.min(d.missingQty, toNumber(d.qty))}.`;
     if (!isWhole(d.freeQty)) e.freeQty = "A whole number, 0 or more.";
     if (d.unitPrice === "" || toNumber(d.unitPrice) < 0) e.unitPrice = "Enter the price.";
     if (d.discountPct === "" || toNumber(d.discountPct) < 0 || toNumber(d.discountPct) > 100) e.discountPct = "A % from 0 to 100.";
@@ -221,34 +311,107 @@ export function SaleForm({
     return e;
   }
 
-  /** Add the panel's item to the bill (or update the one being edited) */
+  /** The item box and its free issue choice, to tell if an item loaded into it was changed */
+  const draftSnapshot = () => JSON.stringify([draft, draftFreeKind, draftOther]);
+
+  /** What's wrong with the item box's free issue of another item, if anything */
+  function checkOtherFree(mainCode: string, linked: LineDraft | undefined): string | undefined {
+    const qty = toNumber(draft.freeQty);
+    if (draftFreeKind !== "other" || !isWhole(draft.freeQty) || qty === 0) return undefined;
+    if (!draftOther) return "Pick the item given free.";
+    if (draftOther === mainCode) return "For the same item, pick Same item.";
+    if (lines.some((l) => splitKey(l.stockKey).sapCode === draftOther && l.key !== linked?.key))
+      return "That item is already on the bill. Give its free issue on its own row.";
+    const keep = linked && splitKey(linked.stockKey).sapCode === draftOther ? linked.stockKey : stockKeyOf(draftOther, locationFor(draftOther));
+    if (!splitKey(keep).locationNumber) return "That item has no stock location yet. Set it on the Items page.";
+    if (stockOut && qty > (available.get(keep) ?? 0)) return `Only ${formatQty(available.get(keep) ?? 0)} of it in stock.`;
+    return undefined;
+  }
+
+  /** Add the panel's item to the bill (or update the one being edited), with its free issue */
   function saveDraft() {
-    const e = checkDraft(draft);
+    const mainCode = splitKey(draft.stockKey).sapCode;
+    const before = lines.find((l) => l.key === editingKey);
+    // The free issue item given with this one so far (by its item code before the edit)
+    const linked = linkedFree(lines, before ? splitKey(before.stockKey).sapCode : mainCode);
+    const other = draftFreeKind === "other";
+    // Another item's free issue goes on its own line; this line keeps only free issue of the same item
+    const main = { ...draft, freeQty: other ? "0" : draft.freeQty };
+    const e = checkDraft(main);
+    const otherErr = checkOtherFree(mainCode, linked);
+    if (other && !isWhole(draft.freeQty)) e.freeQty = "A whole number, 0 or more.";
+    else if (otherErr) e.freeQty = otherErr;
     setDraftErrors(e);
     if (Object.keys(e).length) return;
-    setLines((ls) => (editingKey ? ls.map((l) => (l.key === editingKey ? draft : l)) : [...ls, draft]));
+
+    const freeQty = toNumber(draft.freeQty);
+    setLines((ls) => {
+      let next = editingKey ? ls.map((l) => (l.key === editingKey ? main : l)) : [...ls, main];
+      if (linked) next = next.filter((l) => l.key !== linked.key);
+      if (other && freeQty > 0) {
+        // The same free item keeps its line (location, price, anything reduced)
+        const same = linked && splitKey(linked.stockKey).sapCode === draftOther ? linked : undefined;
+        next = [
+          ...next,
+          {
+            ...(same ?? emptyDraft()),
+            stockKey: same?.stockKey ?? stockKeyOf(draftOther, locationFor(draftOther)),
+            qty: "0",
+            freeQty: String(freeQty),
+            unitPrice: same?.unitPrice ?? String(itemMap.get(draftOther)?.wholesalePrice ?? 0),
+            discountPct: "0",
+            freeWith: mainCode,
+          },
+        ];
+      }
+      return next;
+    });
     setFormError(undefined);
-    setDraft(emptyDraft());
-    setEditingKey(null);
+    resetDraft();
     focusField("saleDraftItem");
   }
 
+  /** Empty the item box (and stop editing) */
+  function resetDraft() {
+    setDraft(emptyDraft());
+    setEditingKey(null);
+    setDraftErrors({});
+    setDraftFreeKind("same");
+    setDraftOther("");
+  }
+
   function editLine(l: LineDraft) {
-    setDraft(l);
+    // Its free issue: of another item if one is given with it, else of the same item
+    const linked = linkedFree(lines, splitKey(l.stockKey).sapCode);
+    const loaded = linked ? { ...l, freeQty: linked.freeQty } : l;
+    const kind: FreeKind = linked ? "other" : "same";
+    const other = linked ? splitKey(linked.stockKey).sapCode : "";
+    setDraft(loaded);
+    setDraftFreeKind(kind);
+    setDraftOther(other);
+    setEditStart(JSON.stringify([loaded, kind, other]));
     setEditingKey(l.key);
     setDraftErrors({});
     document.getElementById("saleDraftPanel")?.scrollIntoView({ block: "nearest", behavior: "smooth" });
     focusField("saleDraftQty");
   }
 
+  /** Empty the add-item boxes */
+  function clearDraft() {
+    resetDraft();
+    focusField("saleDraftItem");
+  }
+
   function cancelEdit() {
-    setDraft(emptyDraft());
-    setEditingKey(null);
-    setDraftErrors({});
+    resetDraft();
   }
 
   function removeLine(key: string) {
-    setLines((ls) => ls.filter((l) => l.key !== key));
+    // A free issue item given with it goes too
+    setLines((ls) => {
+      const code = splitKey(ls.find((l) => l.key === key)?.stockKey ?? "").sapCode;
+      return ls.filter((l) => l.key !== key && !(isFreeLine(l) && l.freeWith && l.freeWith === code));
+    });
     if (editingKey === key) cancelEdit();
   }
 
@@ -259,10 +422,56 @@ export function SaleForm({
     saveDraft();
   }
 
+  function pickFreeItem(sapCode: string) {
+    setFreeDraft((d) => ({ ...d, stockKey: stockKeyOf(sapCode, locationFor(sapCode)) }));
+    setFreeError(undefined);
+    focusField("saleFreeQty");
+  }
+
+  /** Add the free issue box's item to the bill: a line with qty 0, valued at its wholesale price (what Raigam pays back) */
+  function addFreeItem() {
+    const { sapCode, locationNumber } = splitKey(freeDraft.stockKey);
+    const qty = Number(freeDraft.freeQty);
+    const onBill = lines.find((l) => splitKey(l.stockKey).sapCode === sapCode);
+    const have = available.get(freeDraft.stockKey) ?? 0;
+    let err: string | undefined;
+    if (!sapCode) err = "Pick the free issue item.";
+    else if (!locationNumber) err = "This item has no stock location yet. Set it on the Items page.";
+    else if (onBill)
+      err = isFreeLine(onBill)
+        ? "Already in the free issue items. Remove it and add it again with the full qty."
+        : "Already on the bill as an item: enter its free qty in that item's Free Issue box.";
+    else if (freeDraft.freeQty === "" || !Number.isInteger(qty) || qty <= 0) err = "Enter the free qty (a whole number above 0).";
+    // Loaded/delivered bills must stay within stock; new bills are only checked when loading
+    else if (stockOut && qty > have) err = `Only ${formatQty(have)} in stock.`;
+    setFreeError(err);
+    if (err) return;
+    setLines((ls) => [
+      ...ls,
+      {
+        ...emptyDraft(),
+        stockKey: freeDraft.stockKey,
+        qty: "0",
+        freeQty: String(qty),
+        unitPrice: String(itemMap.get(sapCode)?.wholesalePrice ?? 0),
+      },
+    ]);
+    setFreeDraft(emptyFree);
+    setFormError(undefined);
+    focusField("saleFreeItem");
+  }
+
+  // Enter in the free issue box adds the item instead of saving the whole bill
+  function onFreeKeyDown(e: KeyboardEvent<HTMLDivElement>) {
+    if (e.key !== "Enter" || e.defaultPrevented || !(e.target instanceof HTMLInputElement)) return;
+    e.preventDefault();
+    addFreeItem();
+  }
+
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     const editing = lines.find((l) => l.key === editingKey);
-    const pending = editing ? JSON.stringify(editing) !== JSON.stringify(draft) : !!draft.stockKey || draft.qty !== "";
+    const pending = editing ? draftSnapshot() !== editStart : !!draft.stockKey || draft.qty !== "";
 
     let error: string | undefined;
     if (!shopId) error = "Select the store this bill is for.";
@@ -272,7 +481,10 @@ export function SaleForm({
     else if (invoiceNo.trim() && sales.some((s) => s.id !== sale?.id && s.invoiceNo === invoiceNo.trim().toUpperCase()))
       error = `Raigam invoice ${invoiceNo.trim().toUpperCase()} is already on ${sales.find((s) => s.invoiceNo === invoiceNo.trim().toUpperCase())?.saleNo}.`;
     else if (pending) error = editing ? "Press Update item to keep your changes to the item, or Cancel edit." : "You started an item but didn't add it. Press Add item, or clear it.";
-    else if (returnStarted(returnDraft)) error = "You started a return but didn't add it. Press Add return, or Clear.";
+    else if (freeDraft.stockKey || freeDraft.freeQty !== "") error = "You started a free issue item but didn't add it. Press Add free item, or clear it.";
+    else if (editingReturn && JSON.stringify(returns.find((r) => r.key === editingReturn)) !== JSON.stringify(returnDraft))
+      error = "Press Update return to keep your changes to the return, or Cancel edit.";
+    else if (!editingReturn && returnStarted(returnDraft)) error = "You started a return but didn't add it. Press Add return, or Clear.";
     else if (lines.length === 0) error = "Add at least one item.";
     else if (Number.isNaN(Number(discountPercent)) || pct < 0 || pct >= 100) error = "Bill discount must be a % from 0 to 99.99.";
     else if (gross < 0) error = "The returns on this bill are worth more than its items.";
@@ -297,6 +509,7 @@ export function SaleForm({
         takenOff: l.takenOff,
         unitPrice: toNumber(l.unitPrice),
         discountPct: toNumber(l.discountPct),
+        freeWith: l.freeWith,
       })),
       returns: returnsInput(returns),
     };
@@ -323,7 +536,14 @@ export function SaleForm({
   }
 
   const shopOptions = shops.filter((s) => s.active || s.id === shopId).sort((a, b) => a.shopName.localeCompare(b.shopName));
-  const showCancel = lines.some((l) => l.cancelQty > 0);
+  // Items sold (the Items card), and other items given only free (the Free issue items card)
+  const soldLines = lines.filter((l) => !isFreeLine(l));
+  const freeLines = lines.filter(isFreeLine);
+  const showCancel = soldLines.some((l) => l.cancelQty > 0);
+  const showMissing = soldLines.some((l) => l.missingQty > 0);
+  const freeMissing = freeLines.some((l) => l.missingQty > 0);
+  const freeCode = splitKey(freeDraft.stockKey).sapCode;
+  const freeItem = itemMap.get(freeCode);
 
   return (
     <>
@@ -448,7 +668,9 @@ export function SaleForm({
             title={
               <span className="flex items-center gap-2">
                 Items
-                {lines.length > 0 && <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600 tabular-nums">{lines.length}</span>}
+                {soldLines.length > 0 && (
+                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600 tabular-nums">{soldLines.length}</span>
+                )}
               </span>
             }
             description={
@@ -471,7 +693,7 @@ export function SaleForm({
                 </button>
               </div>
             )}
-            {/* One row on a wide screen: item, qty, free, price, discount, value, add */}
+            {/* One row on a wide screen: item, qty, price, discount, value, add; its free issue below */}
             <div className="grid grid-cols-2 gap-x-3 gap-y-4 sm:grid-cols-4 lg:grid-cols-[minmax(0,1fr)_6rem_6rem_7.5rem_5.5rem_8.5rem_auto] lg:items-start">
               <Field
                 label="Item"
@@ -494,29 +716,34 @@ export function SaleForm({
                   aria-invalid={!!draftErrors.stockKey}
                 />
               </Field>
+              {/* Booked − taken off = qty (as on Raigam's bill) */}
+              <Field
+                label="Taken off"
+                htmlFor="saleDraftTakenOff"
+                hint={draft.takenOff && isWhole(draft.qty) ? `Booked ${formatQty(toNumber(draft.qty) + draft.takenOff)}` : "As on Raigam"}
+              >
+                <Input
+                  id="saleDraftTakenOff"
+                  type="number"
+                  min={0}
+                  step={1}
+                  inputMode="numeric"
+                  value={draft.takenOff ? String(draft.takenOff) : ""}
+                  placeholder="0"
+                  onChange={(e) => changeDraftTakenOff(e.target.value)}
+                  className="text-right tabular-nums"
+                />
+              </Field>
               <Field label="Qty" htmlFor="saleDraftQty" required error={draftErrors.qty}>
                 <Input
                   id="saleDraftQty"
                   type="number"
-                  min={1}
+                  min={0}
                   step={1}
                   inputMode="numeric"
                   value={draft.qty}
                   onChange={(e) => setDraftField({ qty: e.target.value })}
                   aria-invalid={!!draftErrors.qty}
-                  className="text-right tabular-nums"
-                />
-              </Field>
-              <Field label="Free Issue" htmlFor="saleDraftFree" error={draftErrors.freeQty}>
-                <Input
-                  id="saleDraftFree"
-                  type="number"
-                  min={0}
-                  step={1}
-                  inputMode="numeric"
-                  value={draft.freeQty}
-                  onChange={(e) => setDraftField({ freeQty: e.target.value })}
-                  aria-invalid={!!draftErrors.freeQty}
                   className="text-right tabular-nums"
                 />
               </Field>
@@ -557,12 +784,15 @@ export function SaleForm({
                   className="text-right tabular-nums"
                 />
               </Field>
-              <Field label="Value" className="sm:col-span-2 lg:col-span-1">
+              <Field label="Value" className="col-span-2 lg:col-span-1">
                 <ReadOnlyValue className="justify-end font-semibold text-slate-900 tabular-nums">{formatMoney(lineValue(priced(draft)))}</ReadOnlyValue>
               </Field>
-              {/* pt = the label's height, so the button lines up with the boxes */}
-              <div className="pt-[1.625rem] sm:col-span-2 lg:col-span-1">
-                <Button onClick={saveDraft} className="w-full lg:w-auto">
+              {/* pt = the label's height, so the buttons line up with the boxes */}
+              <div className="col-span-2 flex gap-2 pt-[1.625rem] lg:col-span-1">
+                <Button variant="outline" onClick={editingKey ? cancelEdit : clearDraft} className="flex-1 lg:flex-none">
+                  {editingKey ? "Cancel" : "Clear"}
+                </Button>
+                <Button onClick={saveDraft} className="flex-1 lg:flex-none">
                   {editingKey ? (
                     <>
                       <Pencil /> Update
@@ -574,6 +804,74 @@ export function SaleForm({
                   )}
                 </Button>
               </div>
+            </div>
+
+            {/* Its free issue: more of the same item, or another item given with it (saved as its own linked line) */}
+            <div className="mt-4 flex flex-wrap items-end gap-x-3 gap-y-3">
+              <div className="flex flex-col gap-1.5">
+                <span className="text-sm font-medium text-slate-700">Free issue</span>
+                <FilterTabs<FreeKind>
+                  value={draftFreeKind}
+                  onChange={(kind) => {
+                    setDraftFreeKind(kind);
+                    setDraftErrors((e) => ({ ...e, freeQty: undefined }));
+                    focusField(kind === "other" ? "saleDraftOther" : "saleDraftFree");
+                  }}
+                  options={[
+                    { value: "same", label: "Same item" },
+                    { value: "other", label: "Another item" },
+                  ]}
+                />
+              </div>
+              {draftFreeKind === "other" && (
+                <Field
+                  label="Item given free"
+                  htmlFor="saleDraftOther"
+                  className="min-w-56 flex-1 sm:max-w-md"
+                  hint={
+                    draftOther
+                      ? `${formatQty(available.get(stockKeyOf(draftOther, locationFor(draftOther))) ?? 0)} in stock`
+                      : "e.g. Coffee 50g free with Coffee 100g"
+                  }
+                >
+                  <SearchSelect
+                    id="saleDraftOther"
+                    value={draftOther}
+                    onChange={(code) => {
+                      setDraftOther(code);
+                      setDraftErrors((e) => ({ ...e, freeQty: undefined }));
+                      focusField("saleDraftFree");
+                    }}
+                    options={itemOptions.map((o) => ({
+                      ...o,
+                      // Not the item itself, nor one already on the bill (its own linked free item can stay)
+                      disabled:
+                        o.value === draftCode ||
+                        lines.some(
+                          (l) => splitKey(l.stockKey).sapCode === o.value && !(l.freeWith && l.freeWith === draftCode && isFreeLine(l)),
+                        ),
+                    }))}
+                    placeholder="Pick the item…"
+                    showDescription
+                  />
+                </Field>
+              )}
+              <Field label="Free Qty" htmlFor="saleDraftFree" error={draftErrors.freeQty} className="w-28">
+                <Input
+                  id="saleDraftFree"
+                  type="number"
+                  min={0}
+                  step={1}
+                  inputMode="numeric"
+                  value={draft.freeQty}
+                  onChange={(e) => setDraftField({ freeQty: e.target.value })}
+                  aria-invalid={!!draftErrors.freeQty}
+                  className="text-right tabular-nums"
+                />
+              </Field>
+              {draftFreeKind === "same" && (
+                <p className="pb-2.5 text-xs text-slate-500">More {draftItem?.description ?? "of the same item"}, given free</p>
+              )}
             </div>
           </div>
 
@@ -588,6 +886,7 @@ export function SaleForm({
                 <TH className="text-right">Unit Price</TH>
                 <TH className="text-right">Disc. %</TH>
                 <TH className="text-right">Disc. Value</TH>
+                {showMissing && <TH className="text-right">Reduced</TH>}
                 {showCancel && <TH className="text-right">Cancelled</TH>}
                 <TH className="text-right">Value</TH>
                 <TH className="w-24">
@@ -596,12 +895,12 @@ export function SaleForm({
               </tr>
             </THead>
             <TBody>
-              {lines.length === 0 && <EmptyRow colSpan={showCancel ? 11 : 10}>No items yet. Add the first one above.</EmptyRow>}
-              {lines.map((l, index) => {
+              {soldLines.length === 0 && <EmptyRow colSpan={10 + Number(showCancel) + Number(showMissing)}>No items yet. Add the first one above.</EmptyRow>}
+              {soldLines.map((l, index) => {
                 const { sapCode, locationNumber } = splitKey(l.stockKey);
                 const item = itemMap.get(sapCode);
                 const p = priced(l);
-                const book = round2((p.qty - p.cancelQty) * p.unitPrice);
+                const book = round2(chargedQty(p) * p.unitPrice);
                 const short = unitsOut(l) > (available.get(l.stockKey) ?? 0);
                 return (
                   <TR key={l.key} className={cn(l.key === editingKey && "bg-amber-50/70")}>
@@ -611,7 +910,20 @@ export function SaleForm({
                       <span className="block font-mono text-xs text-slate-500">
                         {sapCode} · {locationNumber}
                       </span>
-                      {l.takenOff > 0 && <span className="block text-xs font-medium text-amber-700">{formatQty(l.takenOff)} taken off on Raigam</span>}
+                      {l.takenOff > 0 && (
+                        <span className="block text-xs font-medium text-red-600">
+                          Booked {formatQty(toNumber(l.qty) + l.takenOff)} · {formatQty(l.takenOff)} taken off
+                        </span>
+                      )}
+                      {(() => {
+                        const given = linkedFree(lines, sapCode);
+                        return given ? (
+                          <span className="block text-xs text-emerald-700">
+                            + {formatQty(toNumber(given.freeQty))} {itemMap.get(splitKey(given.stockKey).sapCode)?.description ?? "item"} free
+                          </span>
+                        ) : null;
+                      })()}
+                      <SavedLineNotes line={sale?.lines.find((x) => x.id === l.key)} />
                     </TD>
                     <TD className={cn("text-right tabular-nums", short ? "font-medium text-amber-700" : "text-slate-500")}>
                       {formatQty(available.get(l.stockKey) ?? 0)}
@@ -621,6 +933,11 @@ export function SaleForm({
                     <TD className="text-right tabular-nums">{formatMoney(p.unitPrice)}</TD>
                     <TD className="text-right tabular-nums">{p.discountPct ? `${p.discountPct}%` : "—"}</TD>
                     <TD className="text-right tabular-nums">{p.discountPct ? formatMoney(round2(book - lineValue(p))) : "—"}</TD>
+                    {showMissing && (
+                      <TD className={cn("text-right tabular-nums", l.missingQty > 0 && "font-medium text-amber-700")}>
+                        {l.missingQty ? formatQty(l.missingQty) : "—"}
+                      </TD>
+                    )}
                     {showCancel && <TD className="text-right tabular-nums">{l.cancelQty ? formatQty(l.cancelQty) : "—"}</TD>}
                     <TD className="text-right font-medium text-slate-900 tabular-nums">{formatMoney(lineValue(p))}</TD>
                     <TD>
@@ -651,6 +968,167 @@ export function SaleForm({
               Not enough stock right now for {shortLines.length} item{shortLines.length > 1 ? "s" : ""} (qty + free). You can save the bill, but it can
               only be loaded once stock is available.
             </p>
+          )}
+        </Card>
+
+        <Card>
+          <CardHeader
+            title={
+              <span className="flex items-center gap-2">
+                Free issue items
+                {freeLines.length > 0 && (
+                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600 tabular-nums">{freeLines.length}</span>
+                )}
+              </span>
+            }
+            description="Other items given free with this bill, e.g. Coffee 50g free with Coffee 100g. Not charged (Raigam pays them back); taken from stock when the bill is loaded."
+            actions={
+              !showFree && (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => {
+                    setShowFree(true);
+                    focusField("saleFreeItem");
+                  }}
+                >
+                  <Plus /> Add free issue item
+                </Button>
+              )
+            }
+          />
+          {showFree && (
+            <>
+              <div onKeyDown={onFreeKeyDown} className={cn("bg-slate-50/70 px-5 py-4", freeLines.length > 0 && "border-b border-slate-200")}>
+                <div className="grid grid-cols-2 gap-x-3 gap-y-4 sm:grid-cols-4 lg:grid-cols-[minmax(0,1fr)_7rem_8.5rem_auto] lg:items-start">
+                  <Field
+                    label="Free item"
+                    htmlFor="saleFreeItem"
+                    required
+                    className="col-span-2 sm:col-span-4 lg:col-span-1"
+                    hint={
+                      freeItem
+                        ? [`${formatQty(available.get(freeDraft.stockKey) ?? 0)} in stock`, freeItem.packageDetails].filter(Boolean).join(" · ")
+                        : undefined
+                    }
+                  >
+                    <SearchSelect
+                      id="saleFreeItem"
+                      value={freeCode}
+                      onChange={pickFreeItem}
+                      options={itemOptions.map((o) => ({ ...o, disabled: o.value !== freeCode && lines.some((l) => splitKey(l.stockKey).sapCode === o.value) }))}
+                      placeholder="Search item code or name…"
+                      showDescription
+                    />
+                  </Field>
+                  <Field label="Free Qty" htmlFor="saleFreeQty" required>
+                    <Input
+                      id="saleFreeQty"
+                      type="number"
+                      min={1}
+                      step={1}
+                      inputMode="numeric"
+                      value={freeDraft.freeQty}
+                      onChange={(e) => {
+                        setFreeDraft((d) => ({ ...d, freeQty: e.target.value }));
+                        setFreeError(undefined);
+                      }}
+                      className="text-right tabular-nums"
+                    />
+                  </Field>
+                  <Field label="Free Value" hint="At the wholesale price">
+                    <ReadOnlyValue className="justify-end tabular-nums">
+                      {formatMoney(round2(toNumber(freeDraft.freeQty) * (freeItem?.wholesalePrice ?? 0)))}
+                    </ReadOnlyValue>
+                  </Field>
+                  {/* pt = the label's height, so the buttons line up with the boxes */}
+                  <div className="col-span-2 flex gap-2 pt-[1.625rem] lg:col-span-1">
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        setFreeDraft(emptyFree);
+                        setFreeError(undefined);
+                        focusField("saleFreeItem");
+                      }}
+                      className="flex-1 lg:flex-none"
+                    >
+                      Clear
+                    </Button>
+                    <Button onClick={addFreeItem} className="flex-1 lg:flex-none">
+                      <Plus /> Add free item
+                    </Button>
+                  </div>
+                </div>
+                {freeError && <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{freeError}</p>}
+              </div>
+              {freeLines.length > 0 && (
+                <Table>
+                  <THead>
+                    <tr>
+                      <TH className="w-10">#</TH>
+                      <TH>Item</TH>
+                      <TH className="text-right">In Stock</TH>
+                      <TH className="text-right">Free Qty</TH>
+                      <TH className="text-right">Unit Price</TH>
+                      {freeMissing && <TH className="text-right">Reduced</TH>}
+                      <TH className="text-right">Free Value</TH>
+                      <TH className="w-16">
+                        <span className="sr-only">Actions</span>
+                      </TH>
+                    </tr>
+                  </THead>
+                  <TBody>
+                    {freeLines.map((l, index) => {
+                      const { sapCode, locationNumber } = splitKey(l.stockKey);
+                      const item = itemMap.get(sapCode);
+                      const short = unitsOut(l) > (available.get(l.stockKey) ?? 0);
+                      return (
+                        <TR key={l.key}>
+                          <TD className="text-slate-400 tabular-nums">{index + 1}</TD>
+                          <TD className="whitespace-normal">
+                            <span className="block font-medium text-slate-900">{item?.description ?? "Unknown item"}</span>
+                            <span className="block font-mono text-xs text-slate-500">
+                              {sapCode} · {locationNumber}
+                            </span>
+                            {l.freeWith && (
+                              <span className="block text-xs text-emerald-700">Free with {itemMap.get(l.freeWith)?.description ?? l.freeWith}</span>
+                            )}
+                            <SavedLineNotes line={sale?.lines.find((x) => x.id === l.key)} />
+                          </TD>
+                          <TD className={cn("text-right tabular-nums", short ? "font-medium text-amber-700" : "text-slate-500")}>
+                            {formatQty(available.get(l.stockKey) ?? 0)}
+                          </TD>
+                          <TD className="text-right font-semibold text-slate-900 tabular-nums">{formatQty(toNumber(l.freeQty))}</TD>
+                          <TD className="text-right tabular-nums">{formatMoney(toNumber(l.unitPrice))}</TD>
+                          {freeMissing && (
+                            <TD className={cn("text-right tabular-nums", l.missingQty > 0 && "font-medium text-amber-700")}>
+                              {l.missingQty ? formatQty(l.missingQty) : "—"}
+                            </TD>
+                          )}
+                          <TD className="text-right tabular-nums">
+                            {formatMoney(round2(Math.max(0, toNumber(l.freeQty) - l.missingQty) * toNumber(l.unitPrice)))}
+                          </TD>
+                          <TD>
+                            <div className="flex justify-end">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="hover:bg-red-50 hover:text-red-600"
+                                onClick={() => removeLine(l.key)}
+                                aria-label={`Remove free item ${index + 1}`}
+                                title="Remove"
+                              >
+                                <Trash2 />
+                              </Button>
+                            </div>
+                          </TD>
+                        </TR>
+                      );
+                    })}
+                  </TBody>
+                </Table>
+              )}
+            </>
           )}
         </Card>
 
@@ -695,9 +1173,28 @@ export function SaleForm({
                   setFormError(undefined);
                 }}
                 priceOf={returnPrice}
-                className={cn("bg-slate-50/70 p-5", returns.length > 0 && "border-b border-slate-200")}
+                editingKey={editingReturn}
+                onEditEnd={() => setEditingReturn(null)}
+                className={cn("bg-slate-50/70 p-5", editingReturn ? "bg-amber-50/60" : "", returns.length > 0 && "border-b border-slate-200")}
               />
-              <ReturnTable returns={returns} onRemove={(key) => setReturns((rs) => rs.filter((r) => r.key !== key))} />
+              <ReturnTable
+                returns={returns}
+                editingKey={editingReturn}
+                onEdit={(key) => {
+                  // Load it into the box above; Update return puts it back in its place
+                  setReturnDraft(returns.find((r) => r.key === key) ?? blankReturn());
+                  setEditingReturn(key);
+                  setFormError(undefined);
+                  focusField("saleReturnQty");
+                }}
+                onRemove={(key) => {
+                  setReturns((rs) => rs.filter((r) => r.key !== key));
+                  if (key === editingReturn) {
+                    setEditingReturn(null);
+                    setReturnDraft(blankReturn());
+                  }
+                }}
+              />
             </>
           )}
         </Card>

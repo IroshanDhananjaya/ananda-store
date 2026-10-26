@@ -1,11 +1,11 @@
-import { isDelivered, lineValue, returnsTotal, saleTotal } from "./ledger";
+import { chargedQty, isDelivered, lineValue, returnsTotal, saleTotal } from "./ledger";
 import type { Expense, ExpenseCategory, Sale, Shop } from "./types";
 import { round2, todayISO } from "./utils";
 
 // Profit (accrual): a bill counts in the month it was DELIVERED.
 //   sales        = invoice value + return items (the store's credit for good and market
 //                  returns is claimed back from Raigam, so returns don't lower profit)
-//   cost         = (qty − cancelled) × cost price saved on each bill line.
+//   cost         = charged qty (less missing and cancelled) × cost price saved on each bill line.
 //                  Free issue isn't a cost: Raigam pays it back.
 //   gross profit = sales − cost
 //   net profit   = gross profit − expenses
@@ -20,7 +20,7 @@ export function inPeriod(iso: string, p: Period) {
 }
 
 export function saleCost(sale: Pick<Sale, "lines">) {
-  return round2(sale.lines.reduce((sum, l) => sum + (l.qty - l.cancelQty) * l.costPrice, 0));
+  return round2(sale.lines.reduce((sum, l) => sum + chargedQty(l) * l.costPrice, 0));
 }
 
 /** What a delivered bill earns: the invoice value plus the return credit Raigam pays back */
@@ -60,7 +60,7 @@ export function profitFor(sales: Sale[], expenses: Expense[], p: Period): Profit
     f.sales += saleRevenue(s);
     f.cost += saleCost(s);
     f.bills += 1;
-    f.units += s.lines.reduce((n, l) => n + l.qty - l.cancelQty, 0);
+    f.units += s.lines.reduce((n, l) => n + chargedQty(l), 0);
   }
   for (const e of expenses) if (inPeriod(e.date, p)) f.expenses += e.amount;
   return finish(f);
@@ -88,9 +88,9 @@ export function profitByItem(sales: Sale[], p: Period): ItemProfit[] {
     const keep = 1 - s.discountPercent / 100;
     for (const l of s.lines) {
       const row = map.get(l.sapCode) ?? { sapCode: l.sapCode, qty: 0, sales: 0, cost: 0, profit: 0 };
-      row.qty += l.qty - l.cancelQty;
+      row.qty += chargedQty(l);
       row.sales += lineValue(l) * keep;
-      row.cost += (l.qty - l.cancelQty) * l.costPrice;
+      row.cost += chargedQty(l) * l.costPrice;
       map.set(l.sapCode, row);
     }
   }

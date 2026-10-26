@@ -19,10 +19,13 @@ type Values = {
   wholesalePrice: string;
   retailPrice: string;
   locationNumber: string;
+  sheetSection: string;
+  sheetNo: string;
 };
 
 function toValues(item: Item | null): Values {
-  if (!item) return { sapCode: "", description: "", packageDetails: "", uom: "PKT", costPrice: "", wholesalePrice: "", retailPrice: "", locationNumber: "" };
+  if (!item)
+    return { sapCode: "", description: "", packageDetails: "", uom: "PKT", costPrice: "", wholesalePrice: "", retailPrice: "", locationNumber: "", sheetSection: "", sheetNo: "" };
   return {
     sapCode: item.sapCode,
     description: item.description,
@@ -32,11 +35,14 @@ function toValues(item: Item | null): Values {
     wholesalePrice: String(item.wholesalePrice),
     retailPrice: String(item.retailPrice),
     locationNumber: item.locationNumber,
+    sheetSection: item.sheetSection,
+    sheetNo: item.sheetNo ? String(item.sheetNo) : "",
   };
 }
 
 function ItemForm({ item, focusLocation, onDone }: { item: Item | null; focusLocation?: boolean; onDone: () => void }) {
   const locations = useAppStore((s) => s.locations);
+  const items = useAppStore((s) => s.items);
   const addItem = useAppStore((s) => s.addItem);
   const updateItem = useAppStore((s) => s.updateItem);
   const [values, setValues] = useState<Values>(() => toValues(item));
@@ -54,6 +60,7 @@ function ItemForm({ item, focusLocation, onDone }: { item: Item | null; focusLoc
     if (values.costPrice === "" || toNumber(values.costPrice) < 0) next.costPrice = "Enter what you pay Raigam (0 or more).";
     if (values.wholesalePrice === "" || toNumber(values.wholesalePrice) < 0) next.wholesalePrice = "Enter a price of 0 or more.";
     if (values.retailPrice === "" || toNumber(values.retailPrice) < 0) next.retailPrice = "Enter a price of 0 or more.";
+    if (!Number.isInteger(toNumber(values.sheetNo)) || toNumber(values.sheetNo) < 0) next.sheetNo = "A whole number, or leave it empty.";
     setErrors(next);
     if (Object.keys(next).length) return;
 
@@ -66,6 +73,8 @@ function ItemForm({ item, focusLocation, onDone }: { item: Item | null; focusLoc
       wholesalePrice: toNumber(values.wholesalePrice),
       retailPrice: toNumber(values.retailPrice),
       locationNumber: values.locationNumber,
+      sheetSection: values.sheetSection,
+      sheetNo: toNumber(values.sheetNo),
     };
     const result = await (item ? updateItem(item.id, input) : addItem(input));
     if (!result.ok) {
@@ -165,6 +174,26 @@ function ItemForm({ item, focusLocation, onDone }: { item: Item | null; focusLoc
             </option>
           ))}
         </Select>
+      </Field>
+      <Field label="Order Sheet Section" htmlFor="sheetSection" hint="Heading it's under on Raigam's goods order sheet. Empty = Other items.">
+        <Input id="sheetSection" list="sheet-sections" value={values.sheetSection} onChange={set("sheetSection")} placeholder="e.g. BLUE PACK SOYA" className="uppercase" />
+        <datalist id="sheet-sections">
+          {[...new Set(items.map((i) => i.sheetSection).filter(Boolean))].map((section) => (
+            <option key={section} value={section} />
+          ))}
+        </datalist>
+      </Field>
+      <Field label="Order Sheet SN" htmlFor="sheetNo" error={errors.sheetNo} hint="Its number (SN) on the sheet; sets the order of items.">
+        <Input
+          id="sheetNo"
+          type="number"
+          min={0}
+          step={1}
+          inputMode="numeric"
+          value={values.sheetNo}
+          onChange={set("sheetNo")}
+          aria-invalid={!!errors.sheetNo}
+        />
       </Field>
     </form>
   );

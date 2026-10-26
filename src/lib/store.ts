@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import { create } from "zustand";
 import { fetchAllData, runAction } from "./actions";
+import { categoryRanks, itemPickOptions } from "./categories";
 import { ACTION_NAMES, emptyData, fail, type Actions, type Data } from "./core";
 import { computeBalances, computeSaleDues } from "./ledger";
 import type { Result } from "./types";
@@ -81,6 +82,18 @@ export const useAppStore = create<AppStore>()((set, get) => {
 export function useItemMap() {
   const items = useAppStore((s) => s.items);
   return useMemo(() => new Map(items.map((i) => [i.sapCode, i])), [items]);
+}
+
+/** Item category -> its place in lists (Raigam's order sheet order; see categories.ts) */
+export function useCategoryRanks() {
+  const items = useAppStore((s) => s.items);
+  return useMemo(() => categoryRanks(items), [items]);
+}
+
+/** Items to pick from, grouped under their categories */
+export function useItemPickOptions() {
+  const items = useAppStore((s) => s.items);
+  return useMemo(() => itemPickOptions(items), [items]);
 }
 
 /** Order ID -> Order lookup */

@@ -1,0 +1,1 @@
+ALTER TABLE "sale_lines" ADD COLUMN "missing_qty" integer DEFAULT 0 NOT NULL;

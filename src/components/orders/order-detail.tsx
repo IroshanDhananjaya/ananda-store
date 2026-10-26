@@ -141,6 +141,8 @@ export function OrderDetail({ id }: { id: string }) {
         <Card>
           <dl className="grid grid-cols-2 gap-x-6 gap-y-5 p-5 sm:grid-cols-3 lg:grid-cols-4">
             <Detail label="Order Date">{formatDate(order.orderDate)}</Detail>
+            {order.requiredDate && <Detail label="Required Date">{formatDate(order.requiredDate)}</Detail>}
+            {order.territory && <Detail label="Territory">{order.territory}</Detail>}
             <Detail label="Order Received Date">{formatDate(order.receivedDate)}</Detail>
             <Detail label="Order Received Time">{order.receivedTime || "—"}</Detail>
             <Detail label="Invoice Number">{order.invoiceNumber || "—"}</Detail>

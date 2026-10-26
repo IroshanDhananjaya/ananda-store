@@ -9,6 +9,7 @@ import { Input, Select } from "@/components/ui/form";
 import { Card, FilterTabs, PageHeader, SearchInput, SummaryTile, TableFooter, Toolbar } from "@/components/ui/layout";
 import { Pagination, usePagination } from "@/components/ui/pagination";
 import { EmptyRow, Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
+import { chargedQty, freeGiven } from "@/lib/ledger";
 import { useAppStore, useItemMap, useSaleDues, useShopMap } from "@/lib/store";
 import type { Sale, SaleLine } from "@/lib/types";
 import { addDays, cn, formatDate, formatMoney, formatQty, includesText, monthStartISO, round2, todayISO, weekdayOf, weekStartISO } from "@/lib/utils";
@@ -30,10 +31,13 @@ function presetRange(preset: Exclude<Preset, "custom">) {
   return { from: today, to: today };
 }
 
-/** Units given free on a line: its free issue, plus a line priced 0 (as on the loading list) less what the store didn't take */
-const freeOf = (l: SaleLine) => l.freeQty + (l.unitPrice === 0 ? l.qty - l.cancelQty : 0);
+/**
+ * Units given free on a line: its free issue (a free item is a line with only free issue), plus a line priced 0
+ * (as on the loading list), less what was missing at loading or the store didn't take
+ */
+const freeOf = (l: SaleLine) => freeGiven(l) + (l.unitPrice === 0 ? chargedQty(l) : 0);
 /** Free issue at the bill's price (what it would have cost the store) */
-const freeValueOf = (l: SaleLine) => round2(l.freeQty * l.unitPrice);
+const freeValueOf = (l: SaleLine) => round2(freeGiven(l) * l.unitPrice);
 const plural = (n: number, word: string) => `${formatQty(n)} ${word}${n === 1 ? "" : "s"}`;
 
 type BillLine = { sale: Sale; line: SaleLine; date: string; free: number; value: number };
@@ -83,7 +87,7 @@ export function FreeIssuesPage() {
       .reduce((map, x) => {
         const row = map.get(x.line.sapCode) ?? { sapCode: x.line.sapCode, bills: 0, sold: 0, free: 0, value: 0 };
         row.bills += 1; // an item is on a bill once
-        row.sold += x.line.unitPrice === 0 ? 0 : x.line.qty - x.line.cancelQty;
+        row.sold += x.line.unitPrice === 0 ? 0 : chargedQty(x.line);
         row.free += x.free;
         row.value = round2(row.value + x.value);
         return map.set(x.line.sapCode, row);
@@ -266,8 +270,9 @@ export function FreeIssuesPage() {
                       <TD className="whitespace-normal">
                         <span className="block font-semibold text-slate-900">{item?.description ?? "Deleted item"}</span>
                         <span className="block font-mono text-xs text-slate-500">{x.line.sapCode}</span>
+                        {x.line.qty === 0 && <span className="block text-xs font-medium text-emerald-700">Free item</span>}
                       </TD>
-                      <TD className="text-right tabular-nums">{formatQty(x.line.qty)}</TD>
+                      <TD className="text-right tabular-nums">{formatQty(chargedQty(x.line))}</TD>
                       <TD className="text-right font-semibold text-slate-900 tabular-nums">{formatQty(x.free)}</TD>
                       <TD className="text-right tabular-nums">{formatMoney(x.value)}</TD>
                       <TD>{d && <BillStatusBadge status={d.status} late={x.sale.late} />}</TD>

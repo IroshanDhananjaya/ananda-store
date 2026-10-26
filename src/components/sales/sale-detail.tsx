@@ -1,9 +1,9 @@
 "use client";
 
-import { Ban, CalendarClock, HandCoins, PackageOpen, Pencil, Plus, Printer, RotateCcw, Trash2, Truck, Undo2 } from "lucide-react";
+import { Ban, CalendarClock, Gift, HandCoins, PackageOpen, Pencil, Plus, Printer, RotateCcw, Trash2, Truck, Undo2 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import type { ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
 import { toast } from "sonner";
 import { ChequeStatusBadge } from "@/components/payments/cheque-status-field";
 import { PaymentFormDialog } from "@/components/payments/payment-form-dialog";
@@ -11,14 +11,27 @@ import { BillStatusBadge, DueDateLabel } from "@/components/ui/badge";
 import { Button, buttonClass } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { BackLink, Card, CardHeader, Detail, PageHeader } from "@/components/ui/layout";
-import { EmptyRow, Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
-import { itemsTotal, lineValue, returnsTotal, saleSubtotal, wholesaleDifference } from "@/lib/ledger";
+import { EmptyRow, GroupRow, Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
+import {
+  chargedQty,
+  freeGiven,
+  isFreeItem,
+  isRemoved,
+  itemsTotal,
+  lineValue,
+  missingSold,
+  returnsTotal,
+  saleSubtotal,
+  wholesaleDifference,
+} from "@/lib/ledger";
 import { saleCost, saleRevenue } from "@/lib/profit";
 import { allTakenOff } from "@/lib/raigam";
-import { useAppStore, useItemMap, useRouteMap, useSaleDues, useShopBalances, useShopMap } from "@/lib/store";
-import type { Payment } from "@/lib/types";
+import { categoryOf, compareByCategory } from "@/lib/categories";
+import { useAppStore, useCategoryRanks, useItemMap, useRouteMap, useSaleDues, useShopBalances, useShopMap } from "@/lib/store";
+import type { Payment, SaleLine, SaleReturn } from "@/lib/types";
 import { useDialog } from "@/lib/use-dialog";
 import { cn, daysUntil, formatDate, formatMoney, formatQty, round2 } from "@/lib/utils";
+import { BillItemDialog, BillReturnDialog, type AddKind } from "./bill-item-dialogs";
 import { BillPaymentDialog } from "./bill-payment-dialog";
 import { BillStatusMenu } from "./bill-status-menu";
 import { CheckedToggle } from "./checked-toggle";
@@ -28,6 +41,53 @@ import { ReturnKindBadge } from "./return-items";
 import { SaleNotFound } from "./sale-pages";
 
 type Dialog = "load" | "unload" | "deliver" | "payment" | "undo" | "delete";
+
+/** An item's name and code; a removed item is struck through in red; its note and the item it's free with underneath */
+function ItemCell({ line, name, packageDetails, freeWith }: { line: SaleLine; name?: string; packageDetails?: string; freeWith?: string }) {
+  const removed = isRemoved(line);
+  return (
+    <TD className="whitespace-normal">
+      <span className={cn("block font-medium", removed ? "text-red-700 line-through" : "text-slate-900")}>{name ?? "Unknown item"}</span>
+      <span className="block font-mono text-xs text-slate-500">
+        {line.sapCode} · {line.locationNumber}
+        {packageDetails ? ` · ${packageDetails}` : ""}
+      </span>
+      {removed && <span className="block text-xs font-semibold text-red-600">Removed from the bill</span>}
+      {freeWith && <span className="block text-xs text-emerald-700">Free with {freeWith}</span>}
+      {line.note && <span className="block text-xs text-slate-600 italic">Note: {line.note}</span>}
+    </TD>
+  );
+}
+
+/** Tick at the end of an item row: removes every unit of it from the bill (kept as a red row), untick puts it back */
+function RemoveCell({ line, name, onToggle }: { line: SaleLine; name: string; onToggle: () => void }) {
+  const removed = isRemoved(line);
+  return (
+    <TD className="text-center print:hidden">
+      <input
+        type="checkbox"
+        checked={removed}
+        onChange={onToggle}
+        className="size-4 cursor-pointer accent-red-600"
+        aria-label={`${removed ? "Put back" : "Remove"} ${name} ${removed ? "on" : "from"} the bill`}
+        title={removed ? "Removed from the bill. Untick to put it back." : "Tick to remove it from the bill (e.g. not in our store)"}
+      />
+    </TD>
+  );
+}
+
+/** Pencil at the end of an item row: change that item only (hidden on the printed bill) */
+function EditItemCell({ onClick, name }: { onClick: () => void; name: string }) {
+  return (
+    <TD className="print:hidden">
+      <div className="flex justify-end">
+        <Button variant="ghost" size="icon" onClick={onClick} aria-label={`Edit ${name}`} title="Edit this item">
+          <Pencil />
+        </Button>
+      </div>
+    </TD>
+  );
+}
 
 function NextStep({ icon, title, text, tone, action }: { icon: ReactNode; title: string; text: ReactNode; tone: "blue" | "red" | "amber"; action: ReactNode }) {
   const tones = {
@@ -57,31 +117,65 @@ export function SaleDetail({ id }: { id: string }) {
   const undoDelivery = useAppStore((s) => s.undoDelivery);
   const unloadSale = useAppStore((s) => s.unloadSale);
   const restoreSale = useAppStore((s) => s.restoreSale);
+  const markMissing = useAppStore((s) => s.markMissing);
   const itemMap = useItemMap();
+  const ranks = useCategoryRanks();
   const shopMap = useShopMap();
   const routeMap = useRouteMap();
   const balances = useShopBalances();
   const dues = useSaleDues();
   const dialog = useDialog<Dialog>();
   const editPayment = useDialog<Payment>();
+  // An item to change, or what to add ("item" / "free")
+  const editItem = useDialog<SaleLine | AddKind>();
+  // A return item to change, or "new" to add one
+  const editReturn = useDialog<SaleReturn | "new">();
+  const removeReturn = useDialog<SaleReturn>();
+  const removeBillReturn = useAppStore((s) => s.removeBillReturn);
   const removePayment = useDialog<Payment>();
 
   if (!sale) return <SaleNotFound />;
 
   const shop = shopMap.get(sale.shopId);
   const route = shop ? routeMap.get(shop.routeId) : undefined;
-  // Units charged (qty less cancelled), and units out of stock with the bill (qty + free, less cancelled)
-  const units = sale.lines.reduce((n, l) => n + l.qty - l.cancelQty, 0);
-  const unitsOut = sale.lines.reduce((n, l) => n + l.qty + l.freeQty - (sale.status === "Delivered" ? l.cancelQty : 0), 0);
-  const hasCancel = sale.lines.some((l) => l.cancelQty > 0);
+  // Units charged (qty less missing and cancelled), and units out of stock with the bill (qty + free, less missing and cancelled)
+  const units = sale.lines.reduce((n, l) => n + chargedQty(l), 0);
+  const unitsOut = sale.lines.reduce((n, l) => n + l.qty + l.freeQty - l.missingQty - (sale.status === "Delivered" ? l.cancelQty : 0), 0);
+  const hasCancel = sale.lines.some((l) => l.cancelQty > 0 && !isFreeItem(l));
+  // Reduced or removed on the bill (e.g. not in our store): not loaded, not charged
+  const removedCount = sale.lines.filter(isRemoved).length;
+  const reducedCount = sale.lines.filter((l) => l.missingQty > 0 && !isRemoved(l)).length;
+  const reducedValue = round2(sale.lines.reduce((sum, l) => sum + lineValue({ ...l, missingQty: 0 }) - lineValue(l), 0));
+  // Items sold, and other items given only free (listed on their own); both under their categories (Raigam's sheet order)
+  const byCategory = (a: SaleLine, b: SaleLine) => compareByCategory(ranks, itemMap.get(a.sapCode), itemMap.get(b.sapCode));
+  const soldLines = sale.lines.filter((l) => !isFreeItem(l)).sort(byCategory);
+  const freeLines = sale.lines.filter(isFreeItem).sort(byCategory);
+  const categoryOfLine = (l: SaleLine) => categoryOf(itemMap.get(l.sapCode));
+  /** A category heading where it starts in a list of lines */
+  const startsCategory = (list: SaleLine[], i: number) => i === 0 || categoryOfLine(list[i]) !== categoryOfLine(list[i - 1]);
+  const soldReduced = soldLines.some((l) => missingSold(l) > 0);
+  const freeReduced = freeLines.some((l) => l.missingQty > 0);
+  // Items can be changed here (one at a time) until the bill is cancelled; reduced or removed until it's delivered
+  const canEditItems = sale.status !== "Cancelled";
+  const canReduce = sale.status === "Ordered" || sale.status === "Loaded";
+
+  /** The Remove tick on an item row: every unit off the bill (a red row), or all back on it */
+  async function toggleRemoved(l: SaleLine) {
+    const removing = !isRemoved(l);
+    const result = await markMissing(sale!.id, { [l.id]: removing ? l.qty + l.freeQty : 0 });
+    const name = itemMap.get(l.sapCode)?.description ?? l.sapCode;
+    if (result.ok) toast.success(removing ? `${name} removed from ${sale!.saleNo}` : `${name} is back on ${sale!.saleNo}`);
+    else toast.error(result.error);
+  }
   const returnUnits = sale.returns.reduce((n, r) => n + r.qty, 0);
   // Synced from Raigam with items taken off there: shown as on Raigam's bill (booked, taken off)
   const hasTakenOff = sale.lines.some((l) => l.takenOff > 0);
+  const soldColumns = 8 + Number(hasCancel) + Number(hasTakenOff) + Number(soldReduced) + Number(canReduce) + Number(canEditItems);
   const nothingLeft = allTakenOff(sale);
   // Lines charged at a price other than the item's wholesale price, and what that adds up to
-  const priced = sale.lines.filter((l) => l.qty - l.cancelQty > 0 && wholesaleDifference(l.unitPrice, itemMap.get(l.sapCode)?.wholesalePrice) !== 0);
+  const priced = sale.lines.filter((l) => chargedQty(l) > 0 && wholesaleDifference(l.unitPrice, itemMap.get(l.sapCode)?.wholesalePrice) !== 0);
   const pricedEffect = round2(
-    priced.reduce((sum, l) => sum + wholesaleDifference(l.unitPrice, itemMap.get(l.sapCode)?.wholesalePrice) * (l.qty - l.cancelQty), 0),
+    priced.reduce((sum, l) => sum + wholesaleDifference(l.unitPrice, itemMap.get(l.sapCode)?.wholesalePrice) * chargedQty(l), 0),
   );
   const d = dues.get(sale.id)!;
   // Payment records on this bill (a receipt can also cover other bills; `amount` is this bill's part)
@@ -279,10 +373,16 @@ export function SaleDetail({ id }: { id: string }) {
       </Card>
 
       <Card className="mt-6">
-        <div className="border-b border-slate-200 px-5 py-3">
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-slate-200 px-5 py-3">
           <h2 className="text-sm font-semibold text-slate-900">
-            Invoice items <span className="font-normal text-slate-500">· {sale.lines.length}</span>
+            Invoice items <span className="font-normal text-slate-500">· {soldLines.length}</span>
             {nothingLeft && <span className="ml-2 font-normal text-red-600">· every item was taken off on Raigam, so nothing to load or collect</span>}
+            {(removedCount > 0 || reducedCount > 0) && (
+              <span className="ml-2 font-normal text-red-600">
+                · {[removedCount ? `${removedCount} removed` : "", reducedCount ? `${reducedCount} reduced` : ""].filter(Boolean).join(", ")}
+                {reducedValue > 0 ? ` (− ${formatMoney(reducedValue)})` : ""}
+              </span>
+            )}
             {priced.length > 0 && (
               <span className="ml-2 font-normal text-amber-700 print:hidden">
                 · {priced.length} priced differently from your wholesale price ({pricedEffect > 0 ? "+" : "−"} {formatMoney(Math.abs(pricedEffect))} on
@@ -290,6 +390,16 @@ export function SaleDetail({ id }: { id: string }) {
               </span>
             )}
           </h2>
+          {canEditItems && (
+            <div className="flex flex-wrap gap-2 print:hidden">
+              <Button variant="secondary" size="sm" onClick={() => editItem.open("item")}>
+                <Plus /> Add item
+              </Button>
+              <Button variant="secondary" size="sm" onClick={() => editItem.open("free")}>
+                <Gift /> Add free issue item
+              </Button>
+            </div>
+          )}
         </div>
         {/* The bill in one line: items, less the return items (listed below the items), and what it comes to */}
         <dl className="flex flex-wrap items-baseline gap-x-8 gap-y-2 border-b border-slate-200 bg-slate-50/70 px-5 py-3 text-sm print:hidden">
@@ -327,94 +437,228 @@ export function SaleDetail({ id }: { id: string }) {
             <tr>
               <TH>#</TH>
               <TH>Item Description</TH>
-              <TH className="text-right">{hasTakenOff ? "Booked" : "Qty"}</TH>
+              <TH className="text-right">{hasTakenOff || soldReduced ? "Booked" : "Qty"}</TH>
               {hasTakenOff && <TH className="text-right">Taken off</TH>}
+              {soldReduced && <TH className="text-right">Reduced</TH>}
               <TH className="text-right">Free</TH>
               <TH className="text-right">Unit Price</TH>
               <TH className="text-right">Disc. %</TH>
               <TH className="text-right">Disc. Value</TH>
               {hasCancel && <TH className="text-right">Cancelled</TH>}
               <TH className="text-right">Value</TH>
+              {canReduce && <TH className="w-16 text-center print:hidden">Remove</TH>}
+              {canEditItems && (
+                <TH className="w-12 print:hidden">
+                  <span className="sr-only">Edit</span>
+                </TH>
+              )}
             </tr>
           </THead>
           <TBody>
-            {sale.lines.length === 0 && <EmptyRow colSpan={8 + Number(hasCancel) + Number(hasTakenOff)}>No items on this bill.</EmptyRow>}
-            {sale.lines.map((l, i) => {
+            {soldLines.length === 0 && (
+              <EmptyRow colSpan={soldColumns}>No items on this bill.</EmptyRow>
+            )}
+            {soldLines.map((l, i) => {
               const item = itemMap.get(l.sapCode);
-              const book = round2((l.qty - l.cancelQty) * l.unitPrice);
+              const book = round2(chargedQty(l) * l.unitPrice);
               const diff = wholesaleDifference(l.unitPrice, item?.wholesalePrice);
+              const removed = isRemoved(l);
               return (
-                <TR key={l.id}>
-                  <TD className="text-slate-400 tabular-nums">{i + 1}</TD>
-                  <TD className="whitespace-normal">
-                    <span className="block font-medium text-slate-900">{item?.description ?? "Unknown item"}</span>
-                    <span className="block font-mono text-xs text-slate-500">
-                      {l.sapCode} · {l.locationNumber}
-                      {item?.packageDetails ? ` · ${item.packageDetails}` : ""}
-                    </span>
-                  </TD>
-                  {/* Booked on Raigam = what's left on the bill + what was taken off there */}
-                  <TD className="text-right tabular-nums">{formatQty(l.qty + l.takenOff)}</TD>
-                  {hasTakenOff && (
-                    <TD className={cn("text-right tabular-nums", l.takenOff > 0 && "font-medium text-red-600")}>{l.takenOff ? formatQty(l.takenOff) : "—"}</TD>
-                  )}
-                  <TD className="text-right tabular-nums">{l.freeQty ? formatQty(l.freeQty) : "—"}</TD>
-                  <TD className={cn("text-right tabular-nums", diff && l.qty - l.cancelQty > 0 && "bg-amber-50/70")}>
-                    {formatMoney(l.unitPrice)}
-                    {diff !== 0 && l.qty - l.cancelQty > 0 && (
-                      <span className="block text-xs font-medium text-amber-700 print:hidden" title="Your wholesale price for this item, and how much the bill's price differs">
-                        Wholesale {formatMoney(item!.wholesalePrice)} · {diff > 0 ? "+" : "−"}
-                        {formatMoney(Math.abs(diff))}
-                      </span>
+                <Fragment key={l.id}>
+                  {startsCategory(soldLines, i) && <GroupRow colSpan={soldColumns}>{categoryOfLine(l)}</GroupRow>}
+                  <TR className={cn(removed && "bg-red-50/80")}>
+                    <TD className="text-slate-400 tabular-nums">{i + 1}</TD>
+                    <ItemCell line={l} name={item?.description} packageDetails={item?.packageDetails} />
+                    {/* Booked on Raigam = what's left on the bill + what was taken off there */}
+                    <TD className="text-right tabular-nums">{formatQty(l.qty + l.takenOff)}</TD>
+                    {hasTakenOff && (
+                      <TD className={cn("text-right tabular-nums", l.takenOff > 0 && "font-medium text-red-600")}>
+                        {/* Opens the item to change it (hidden as a plain number on the printed bill) */}
+                        {canEditItems ? (
+                          <button
+                            type="button"
+                            onClick={() => editItem.open(l)}
+                            className="rounded px-1 tabular-nums underline decoration-dotted underline-offset-4 hover:bg-red-50 print:no-underline"
+                            title="Change the taken off qty"
+                          >
+                            {l.takenOff ? formatQty(l.takenOff) : "—"}
+                          </button>
+                        ) : l.takenOff ? (
+                          formatQty(l.takenOff)
+                        ) : (
+                          "—"
+                        )}
+                      </TD>
                     )}
-                  </TD>
-                  <TD className="text-right tabular-nums">{l.discountPct ? `${l.discountPct}%` : "—"}</TD>
-                  <TD className="text-right tabular-nums">{l.discountPct ? formatMoney(round2(book - lineValue(l))) : "—"}</TD>
-                  {hasCancel && <TD className="text-right tabular-nums">{l.cancelQty ? formatQty(l.cancelQty) : "—"}</TD>}
-                  <TD className="text-right font-medium text-slate-900 tabular-nums">{formatMoney(lineValue(l))}</TD>
-                </TR>
+                    {soldReduced && (
+                      <TD className={cn("text-right tabular-nums", missingSold(l) > 0 && "font-medium text-red-600")}>
+                        {missingSold(l) ? formatQty(missingSold(l)) : "—"}
+                      </TD>
+                    )}
+                    <TD className={cn("text-right tabular-nums", removed && l.freeQty > 0 && "text-red-600 line-through")}>
+                      {l.freeQty ? formatQty(l.freeQty) : "—"}
+                    </TD>
+                    <TD className={cn("text-right tabular-nums", diff && chargedQty(l) > 0 && "bg-amber-50/70")}>
+                      {formatMoney(l.unitPrice)}
+                      {diff !== 0 && chargedQty(l) > 0 && (
+                        <span className="block text-xs font-medium text-amber-700 print:hidden" title="Your wholesale price for this item, and how much the bill's price differs">
+                          Wholesale {formatMoney(item!.wholesalePrice)} · {diff > 0 ? "+" : "−"}
+                          {formatMoney(Math.abs(diff))}
+                        </span>
+                      )}
+                    </TD>
+                    <TD className="text-right tabular-nums">{l.discountPct ? `${l.discountPct}%` : "—"}</TD>
+                    <TD className="text-right tabular-nums">{l.discountPct ? formatMoney(round2(book - lineValue(l))) : "—"}</TD>
+                    {hasCancel && <TD className="text-right tabular-nums">{l.cancelQty ? formatQty(l.cancelQty) : "—"}</TD>}
+                    <TD className={cn("text-right font-medium tabular-nums", removed ? "text-red-600" : "text-slate-900")}>{formatMoney(lineValue(l))}</TD>
+                    {canReduce && <RemoveCell line={l} name={item?.description ?? l.sapCode} onToggle={() => toggleRemoved(l)} />}
+                    {canEditItems && <EditItemCell onClick={() => editItem.open(l)} name={item?.description ?? l.sapCode} />}
+                  </TR>
+                </Fragment>
               );
             })}
           </TBody>
         </Table>
 
-        {sale.returns.length > 0 && (
+        {freeLines.length > 0 && (
           <>
             <div className="border-t border-b border-slate-200 px-5 py-3">
               <h2 className="text-sm font-semibold text-slate-900">
-                Return items{" "}
-                <span className="font-normal text-slate-500">
-                  · {sale.status === "Delivered" ? "taken at delivery" : "to collect at delivery"}, credited on this bill, sent back to Raigam
-                </span>
+                Free issue items <span className="font-normal text-slate-500">· given free with this bill, not charged, Raigam pays them back</span>
               </h2>
             </div>
             <Table>
               <THead>
                 <tr>
-                  <TH>Type</TH>
+                  <TH>#</TH>
                   <TH>Item Description</TH>
-                  <TH className="text-right">Qty</TH>
+                  <TH className="text-right">Free Qty</TH>
+                  {freeReduced && <TH className="text-right">Reduced</TH>}
                   <TH className="text-right">Unit Price</TH>
-                  <TH className="text-right">Value</TH>
+                  <TH className="text-right">Free Value</TH>
+                  {canReduce && <TH className="w-16 text-center print:hidden">Remove</TH>}
+                  {canEditItems && (
+                    <TH className="w-12 print:hidden">
+                      <span className="sr-only">Edit</span>
+                    </TH>
+                  )}
                 </tr>
               </THead>
               <TBody>
-                {sale.returns.map((r) => (
-                  <TR key={r.id}>
-                    <TD>
-                      <ReturnKindBadge kind={r.kind} />
-                    </TD>
-                    <TD className="whitespace-normal">
-                      <span className="block font-medium text-slate-900">{itemMap.get(r.sapCode)?.description ?? "Unknown item"}</span>
-                      <span className="block font-mono text-xs text-slate-500">{r.sapCode}</span>
-                    </TD>
-                    <TD className="text-right tabular-nums">{formatQty(r.qty)}</TD>
-                    <TD className="text-right tabular-nums">{formatMoney(r.unitPrice)}</TD>
-                    <TD className="text-right font-medium text-red-600 tabular-nums">− {formatMoney(round2(r.qty * r.unitPrice))}</TD>
-                  </TR>
-                ))}
+                {freeLines.map((l, i) => {
+                  const item = itemMap.get(l.sapCode);
+                  const removed = isRemoved(l);
+                  return (
+                    <Fragment key={l.id}>
+                      {startsCategory(freeLines, i) && (
+                        <GroupRow colSpan={5 + Number(freeReduced) + Number(canReduce) + Number(canEditItems)}>{categoryOfLine(l)}</GroupRow>
+                      )}
+                      <TR className={cn(removed && "bg-red-50/80")}>
+                        <TD className="text-slate-400 tabular-nums">{i + 1}</TD>
+                        <ItemCell
+                          line={l}
+                          name={item?.description}
+                          packageDetails={item?.packageDetails}
+                          freeWith={l.freeWith ? (itemMap.get(l.freeWith)?.description ?? l.freeWith) : undefined}
+                        />
+                        <TD className="text-right font-medium text-slate-900 tabular-nums">{formatQty(l.freeQty)}</TD>
+                        {freeReduced && (
+                          <TD className={cn("text-right tabular-nums", l.missingQty > 0 && "font-medium text-red-600")}>
+                            {l.missingQty ? formatQty(l.missingQty) : "—"}
+                          </TD>
+                        )}
+                        <TD className="text-right tabular-nums">{formatMoney(l.unitPrice)}</TD>
+                        <TD className={cn("text-right tabular-nums", removed && "text-red-600")}>{formatMoney(round2(freeGiven(l) * l.unitPrice))}</TD>
+                        {canReduce && <RemoveCell line={l} name={item?.description ?? l.sapCode} onToggle={() => toggleRemoved(l)} />}
+                        {canEditItems && <EditItemCell onClick={() => editItem.open(l)} name={item?.description ?? l.sapCode} />}
+                      </TR>
+                    </Fragment>
+                  );
+                })}
               </TBody>
             </Table>
+          </>
+        )}
+
+        {(sale.returns.length > 0 || canEditItems) && (
+          <>
+            {/* With no returns, only the Add return bar shows (and nothing is printed) */}
+            <div
+              className={cn(
+                "flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t border-slate-200 px-5 py-3",
+                sale.returns.length > 0 ? "border-b" : "print:hidden",
+              )}
+            >
+              <h2 className="text-sm font-semibold text-slate-900">
+                Return items{" "}
+                <span className="font-normal text-slate-500">
+                  {sale.returns.length > 0
+                    ? `· ${sale.status === "Delivered" ? "taken at delivery" : "to collect at delivery"}, credited on this bill, sent back to Raigam`
+                    : "· none. Good or market returns the store gives back are credited on this bill."}
+                </span>
+              </h2>
+              {canEditItems && (
+                <Button variant="secondary" size="sm" className="print:hidden" onClick={() => editReturn.open("new")}>
+                  <Plus /> Add return
+                </Button>
+              )}
+            </div>
+            {sale.returns.length > 0 && (
+              <Table>
+                <THead>
+                  <tr>
+                    <TH>Type</TH>
+                    <TH>Item Description</TH>
+                    <TH className="text-right">Qty</TH>
+                    <TH className="text-right">Unit Price</TH>
+                    <TH className="text-right">Value</TH>
+                    {canEditItems && (
+                      <TH className="w-24 print:hidden">
+                        <span className="sr-only">Actions</span>
+                      </TH>
+                    )}
+                  </tr>
+                </THead>
+                <TBody>
+                  {sale.returns.map((r) => {
+                    const name = itemMap.get(r.sapCode)?.description ?? r.sapCode;
+                    return (
+                      <TR key={r.id}>
+                        <TD>
+                          <ReturnKindBadge kind={r.kind} />
+                        </TD>
+                        <TD className="whitespace-normal">
+                          <span className="block font-medium text-slate-900">{itemMap.get(r.sapCode)?.description ?? "Unknown item"}</span>
+                          <span className="block font-mono text-xs text-slate-500">{r.sapCode}</span>
+                        </TD>
+                        <TD className="text-right tabular-nums">{formatQty(r.qty)}</TD>
+                        <TD className="text-right tabular-nums">{formatMoney(r.unitPrice)}</TD>
+                        <TD className="text-right font-medium text-red-600 tabular-nums">− {formatMoney(round2(r.qty * r.unitPrice))}</TD>
+                        {canEditItems && (
+                          <TD className="print:hidden">
+                            <div className="flex items-center justify-end gap-1">
+                              <Button variant="ghost" size="icon" onClick={() => editReturn.open(r)} aria-label={`Edit return of ${name}`} title="Edit this return">
+                                <Pencil />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="hover:bg-red-50 hover:text-red-600"
+                                onClick={() => removeReturn.open(r)}
+                                aria-label={`Remove return of ${name}`}
+                                title="Remove this return"
+                              >
+                                <Trash2 />
+                              </Button>
+                            </div>
+                          </TD>
+                        )}
+                      </TR>
+                    );
+                  })}
+                </TBody>
+              </Table>
+            )}
           </>
         )}
 
@@ -594,6 +838,34 @@ export function SaleDetail({ id }: { id: string }) {
       )}
 
       <LoadLorryDialog open={dialog.target === "load"} onClose={dialog.close} preselect={[sale.id]} />
+      <BillItemDialog
+        sale={sale}
+        line={typeof editItem.target === "string" ? null : editItem.target}
+        addKind={typeof editItem.target === "string" ? editItem.target : "item"}
+        open={editItem.isOpen}
+        onClose={editItem.close}
+      />
+      <BillReturnDialog sale={sale} ret={editReturn.target === "new" ? null : editReturn.target} open={editReturn.isOpen} onClose={editReturn.close} />
+      <ConfirmDialog
+        open={removeReturn.isOpen}
+        onClose={removeReturn.close}
+        title={`Remove this return from ${sale.saleNo}?`}
+        message={
+          removeReturn.target
+            ? `${removeReturn.target.kind} return of ${itemMap.get(removeReturn.target.sapCode)?.description ?? removeReturn.target.sapCode} × ${formatQty(
+                removeReturn.target.qty,
+              )}: ${formatMoney(round2(removeReturn.target.qty * removeReturn.target.unitPrice))} is no longer credited, so the invoice value goes up.`
+            : ""
+        }
+        confirmLabel="Remove return"
+        onConfirm={async () => {
+          if (!removeReturn.target) return;
+          const result = await removeBillReturn(sale.id, removeReturn.target.id);
+          if (result.ok) toast.success(`Return removed from ${sale.saleNo}`);
+          else toast.error(result.error);
+          removeReturn.close();
+        }}
+      />
       <DeliverDialog sale={sale} open={dialog.target === "deliver"} onClose={dialog.close} />
       <ConfirmDialog
         open={dialog.target === "unload"}

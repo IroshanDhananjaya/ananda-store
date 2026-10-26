@@ -54,6 +54,8 @@ function ReceiveForm({ order, lines, onDone }: { order: Order; lines: OrderItem[
         discountPercent: order.discountPercent,
         receivedDate: date,
         receivedTime: time,
+        territory: order.territory,
+        requiredDate: order.requiredDate,
       },
       rows.map((r) => ({
         itemCode: r.itemCode,

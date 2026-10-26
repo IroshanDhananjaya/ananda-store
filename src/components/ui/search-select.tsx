@@ -1,7 +1,7 @@
 "use client";
 
 import { Check, ChevronDown, Plus } from "lucide-react";
-import { useId, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
+import { Fragment, useId, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { cn } from "@/lib/utils";
 
 export type SearchOption = {
@@ -12,6 +12,8 @@ export type SearchOption = {
   /** Small note on the right of the list (e.g. pack size, stock on hand); searched too */
   hint?: string;
   disabled?: boolean;
+  /** Heading it's listed under (e.g. item category); options of a group must be next to each other. Searched too. */
+  group?: string;
 };
 
 const squash = (s: string) => s.replace(/[^a-z0-9]/g, "");
@@ -21,7 +23,7 @@ const squash = (s: string) => s.replace(/[^a-z0-9]/g, "");
  * Spaces and dashes don't matter, so "cuttlefish" finds "Cuttle Fish Soya" and "rmcut" finds "RM-CUT-SOY-90G".
  */
 function matches(o: SearchOption, query: string) {
-  const text = `${o.label} ${o.description ?? ""} ${o.hint ?? ""}`.toLowerCase();
+  const text = `${o.label} ${o.description ?? ""} ${o.hint ?? ""} ${o.group ?? ""}`.toLowerCase();
   const squashed = squash(text);
   return query
     .toLowerCase()
@@ -220,50 +222,59 @@ export function SearchSelect({
           className="fixed z-[60] overflow-y-auto rounded-lg border border-slate-200 bg-white py-1 text-sm shadow-lg"
         >
           {shown.length === 0 && <li className="px-3 py-2 text-slate-500">No matches for “{query}”</li>}
-          {shown.map((o, i) =>
-            o.value === CREATE ? (
-              <li
-                key={o.value}
-                id={`${listId}-${i}`}
-                data-index={i}
-                role="option"
-                aria-selected={false}
-                onMouseMove={() => i !== active && setActive(i)}
-                onClick={() => choose(o)}
-                className={cn(
-                  "flex cursor-pointer items-center gap-2 px-3 py-2 font-medium text-brand-700",
-                  i > 0 && "border-t border-slate-100",
-                  i === active && "bg-brand-50",
-                )}
-              >
-                <Plus className="size-4 shrink-0" />
-                <span className="truncate">{o.label}</span>
-              </li>
-            ) : (
-              <li
-                key={o.value}
-                id={`${listId}-${i}`}
-                data-index={i}
-                role="option"
-                aria-selected={o.value === value}
-                aria-disabled={o.disabled}
-                onMouseMove={() => !o.disabled && i !== active && setActive(i)}
-                onClick={() => choose(o)}
-                className={cn(
-                  "flex cursor-pointer items-center gap-2 px-3 py-1.5",
-                  i === active && !o.disabled && "bg-brand-50",
-                  o.disabled && "cursor-not-allowed opacity-45",
-                )}
-              >
-                <Check className={cn("size-4 shrink-0 text-brand-600", o.value !== value && "invisible")} />
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate font-semibold text-slate-900">{o.label}</span>
-                  {o.description && <span className="block truncate text-xs text-slate-500">{o.description}</span>}
-                </span>
-                {o.hint && <span className="shrink-0 text-xs text-slate-500 tabular-nums">{o.hint}</span>}
-              </li>
-            ),
-          )}
+          {shown.map((o, i) => (
+            <Fragment key={o.value}>
+              {/* A heading where the group changes (not an option: the arrow keys skip it) */}
+              {o.group && o.group !== shown[i - 1]?.group && (
+                <li
+                  role="presentation"
+                  className={cn("px-3 pt-2 pb-1 text-[11px] font-semibold tracking-wide text-brand-700 uppercase", i > 0 && "mt-1 border-t border-slate-100")}
+                >
+                  {o.group}
+                </li>
+              )}
+              {o.value === CREATE ? (
+                <li
+                  id={`${listId}-${i}`}
+                  data-index={i}
+                  role="option"
+                  aria-selected={false}
+                  onMouseMove={() => i !== active && setActive(i)}
+                  onClick={() => choose(o)}
+                  className={cn(
+                    "flex cursor-pointer items-center gap-2 px-3 py-2 font-medium text-brand-700",
+                    i > 0 && "border-t border-slate-100",
+                    i === active && "bg-brand-50",
+                  )}
+                >
+                  <Plus className="size-4 shrink-0" />
+                  <span className="truncate">{o.label}</span>
+                </li>
+              ) : (
+                <li
+                  id={`${listId}-${i}`}
+                  data-index={i}
+                  role="option"
+                  aria-selected={o.value === value}
+                  aria-disabled={o.disabled}
+                  onMouseMove={() => !o.disabled && i !== active && setActive(i)}
+                  onClick={() => choose(o)}
+                  className={cn(
+                    "flex cursor-pointer items-center gap-2 px-3 py-1.5",
+                    i === active && !o.disabled && "bg-brand-50",
+                    o.disabled && "cursor-not-allowed opacity-45",
+                  )}
+                >
+                  <Check className={cn("size-4 shrink-0 text-brand-600", o.value !== value && "invisible")} />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate font-semibold text-slate-900">{o.label}</span>
+                    {o.description && <span className="block truncate text-xs text-slate-500">{o.description}</span>}
+                  </span>
+                  {o.hint && <span className="shrink-0 text-xs text-slate-500 tabular-nums">{o.hint}</span>}
+                </li>
+              )}
+            </Fragment>
+          ))}
         </ul>
       )}
     </div>

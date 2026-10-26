@@ -15,6 +15,10 @@ export type Item = {
   retailPrice: number;
   /** Stock location new loads of this item go to; "" = not set yet */
   locationNumber: string;
+  /** Section on Raigam's goods order sheet, e.g. "BLUE PACK SOYA"; "" = not on the sheet */
+  sheetSection: string;
+  /** SN on Raigam's goods order sheet; 0 = none */
+  sheetNo: number;
 };
 
 /** "Store Location" sheet */
@@ -65,6 +69,10 @@ export type Order = {
   discountPercent: number;
   /** True once received quantities have been added to stock */
   postedToStock: boolean;
+  /** Raigam territory written on the goods order sheet */
+  territory: string;
+  /** ISO date the goods are needed by (order sheet's "Required Date"); empty = not given */
+  requiredDate: string;
 };
 
 /** "Order Item Details" sheet — one line per item in an order */
@@ -134,6 +142,7 @@ export type SaleLine = {
   id: string;
   sapCode: string;
   locationNumber: string;
+  /** Charged qty; 0 for a free item (an item given only as free issue, e.g. Coffee 50g free with Coffee 100g) */
   qty: number;
   /** Free issue (a Raigam scheme they pay back): leaves stock with the line, not charged, not in profit */
   freeQty: number;
@@ -147,6 +156,15 @@ export type SaleLine = {
    * Raigam's bill. Never loaded or charged: `qty` is what's left (0 when all of it was taken off).
    */
   takenOff: number;
+  /**
+   * Reduced on the bill before delivery (e.g. not in our store): not loaded and not charged; `qty` stays as booked.
+   * Comes off the charged qty first, then the free issue (ledger.missingSold / freeGiven); all of it = removed from the bill.
+   */
+  missingQty: number;
+  /** Why the item was reduced or changed, e.g. "only 10 in store"; "" = none */
+  note: string;
+  /** A free issue item given with another item on the bill: that item's SAP code ("" = not linked) */
+  freeWith: string;
   /** Item cost per unit when the bill was saved, so later price changes don't rewrite past profit */
   costPrice: number;
 };
@@ -334,7 +352,18 @@ export type OrderItemInput = OrderLineInput & { orderId: string };
 export type RouteInput = Omit<Route, "id">;
 export type ShopInput = Omit<Shop, "id">;
 /** Cost price is filled in by the store from the item master */
-export type SaleLineInput = Omit<SaleLine, "id" | "costPrice" | "cancelQty">;
+/** `missingQty`, `note`, `freeWith` left out = the line keeps what it had (set from the bill's page) */
+export type SaleLineInput = Omit<SaleLine, "id" | "costPrice" | "cancelQty" | "missingQty" | "note" | "freeWith"> &
+  Partial<Pick<SaleLine, "missingQty" | "note" | "freeWith">>;
+/**
+ * One item changed (or a free issue item added) on the bill's page. `otherFree`: a free issue of another item given
+ * with this one (null = none; left out = leave it as it is).
+ */
+export type BillItemInput = Pick<SaleLine, "sapCode" | "qty" | "freeQty" | "unitPrice" | "discountPct" | "missingQty" | "note"> & {
+  /** Taken off the bill (as on Raigam's bill); left out = keep it */
+  takenOff?: number;
+  otherFree?: { sapCode: string; freeQty: number } | null;
+};
 export type SaleReturnInput = Omit<SaleReturn, "id" | "costPrice">;
 export type RaigamReturnInput = Omit<RaigamReturn, "id" | "returnNo">;
 export type ExpenseInput = Omit<Expense, "id" | "expenseNo">;
@@ -345,7 +374,12 @@ export type SaleInput = Omit<
   lines: SaleLineInput[];
   returns: SaleReturnInput[];
 };
-export type LoadInput = { date: string; vehicleNumber: string };
+export type LoadInput = {
+  date: string;
+  vehicleNumber: string;
+  /** Bill line id -> units not in the store (not loaded, not charged); left out = none */
+  missing?: Record<string, number>;
+};
 /** A load arriving from Raigam with its invoice: saved as a received order and added to stock */
 export type ReceiveLoadInput = {
   invoiceNumber: string;

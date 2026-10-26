@@ -299,9 +299,9 @@ function billInput(
   const returns = new Map<string, SaleReturnInput>();
   for (const l of bill.lines) {
     const sapCode = itemOf(l.itemId);
-    // Items taken off on Raigam stay on the bill (qty 0 if all of it), as on Raigam's bill
+    // Items taken off on Raigam stay on the bill (qty 0 if all of it), as on Raigam's bill;
+    // a free item (only free issue, e.g. Coffee 50g free with Coffee 100g) is a line with qty 0
     if (l.qty > 0 || l.freeQty > 0 || l.takenOff > 0) {
-      if (l.qty === 0 && l.freeQty > 0) return `${l.itemName} is only free issue (none sold), which a bill here can't hold. Enter this bill by hand.`;
       // Two Raigam items matched to one item here go on one line
       const had = lines.get(sapCode);
       if (had && (had.unitPrice !== l.unitPrice || had.discountPct !== l.discountPct))

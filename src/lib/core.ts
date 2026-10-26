@@ -1,6 +1,6 @@
 import type { StateCreator } from "zustand";
-import { billDiscount, linkUnlinkedPayments, normalizeAllocations, payableBills, saleSubtotal, stockIsOut, unlinkedAmount } from "./ledger";
-import { isRaigamBill, NEW_STORE_CREDIT_DAYS, planRaigamSync, putLink, type ItemPicks, type RaigamBill } from "./raigam";
+import { billDiscount, linkUnlinkedPayments, missingSold, normalizeAllocations, payableBills, saleSubtotal, stockIsOut, unlinkedAmount } from "./ledger";
+import { isRaigamBill, NEW_STORE_CREDIT_DAYS, planRaigamSync, putLink, stockLocationFor, type ItemPicks, type RaigamBill } from "./raigam";
 import { returnKey, returnStock, sentMoreThanCollected } from "./returns";
 import {
   seedExpenses,
@@ -37,6 +37,7 @@ import {
   type RouteInput,
   type Sale,
   type BillPaymentInput,
+  type BillItemInput,
   type SaleInput,
   type SaleLine,
   type SaleLineInput,
@@ -134,10 +135,23 @@ export type Actions = {
   updateSale: (id: string, input: SaleInput) => Result;
   /** Deletes an order; loaded/delivered quantities go back into stock */
   deleteSale: (id: string) => Result;
+  /** Change one item on a bill from its page, or add a free issue item (`lineId` null); the rest of the bill stays as it is */
+  saveBillItem: (saleId: string, lineId: string | null, input: BillItemInput) => Result;
+  /** Take one item off a bill from its page */
+  removeBillItem: (saleId: string, lineId: string) => Result;
+  /** Add a return item to a bill from its page (`returnId` null), or change one */
+  saveBillReturn: (saleId: string, returnId: string | null, input: SaleReturnInput) => Result;
+  /** Take one return item off a bill from its page */
+  removeBillReturn: (saleId: string, returnId: string) => Result;
   /** Load bills on the lorry: deducts their quantities from stock (all or nothing) */
   loadSales: (ids: string[], input: LoadInput) => Result;
   /** Take a loaded bill off the lorry: quantities go back into stock */
   unloadSale: (id: string) => Result;
+  /**
+   * Items not in the store, on a bill not delivered yet (bill line id -> units; lines left out keep theirs):
+   * not loaded and not charged. On a loaded bill they go back into stock.
+   */
+  markMissing: (id: string, missing: Record<string, number>) => Result;
   /** Items given to the store; any money collected is saved as a receipt linked to bills */
   deliverSale: (id: string, input: DeliveryInput) => Result;
   /** Undo a delivery entered by mistake: the bill is back on the lorry */
@@ -211,8 +225,13 @@ export const ACTION_NAMES = [
   "createSale",
   "updateSale",
   "deleteSale",
+  "saveBillItem",
+  "removeBillItem",
+  "saveBillReturn",
+  "removeBillReturn",
   "loadSales",
   "unloadSale",
+  "markMissing",
   "deliverSale",
   "undoDelivery",
   "markLate",
@@ -360,14 +379,33 @@ function takeFromStock(stock: StockRecord[], lines: StockMove[], date: string): 
 }
 
 // What a bill moves in and out of stock:
-//   loading takes qty + free issue; at delivery the cancelled qty comes back.
+//   loading takes qty + free issue, less what was missing in the store; at delivery the cancelled qty comes back.
 //   Return items never go into stock: they're held for Raigam (src/lib/returns.ts).
 const loadMoves = (lines: SaleLine[]): StockMove[] =>
-  lines.map((l) => ({ sapCode: l.sapCode, locationNumber: l.locationNumber, qty: l.qty + l.freeQty })).filter((m) => m.qty > 0);
+  lines.map((l) => ({ sapCode: l.sapCode, locationNumber: l.locationNumber, qty: l.qty + l.freeQty - l.missingQty })).filter((m) => m.qty > 0);
 const cancelMoves = (lines: SaleLine[]): StockMove[] =>
   lines.filter((l) => l.cancelQty > 0).map((l) => ({ sapCode: l.sapCode, locationNumber: l.locationNumber, qty: l.cancelQty }));
 const deliveredMoves = (lines: SaleLine[]): StockMove[] =>
-  lines.map((l) => ({ sapCode: l.sapCode, locationNumber: l.locationNumber, qty: l.qty + l.freeQty - l.cancelQty })).filter((m) => m.qty > 0);
+  lines
+    .map((l) => ({ sapCode: l.sapCode, locationNumber: l.locationNumber, qty: l.qty + l.freeQty - l.missingQty - l.cancelQty }))
+    .filter((m) => m.qty > 0);
+
+/** The bill with these units missing (bill line id -> units; lines left out keep theirs); the bill discount follows the new value */
+function withMissing(sale: Sale, missing: Record<string, number>): Sale {
+  const lines = sale.lines.map((l) => ({ ...l, missingQty: missing[l.id] ?? l.missingQty }));
+  return { ...sale, lines, discount: billDiscount(saleSubtotal({ lines, returns: sale.returns }), sale.discountPercent) };
+}
+
+/** What's wrong with missing units for a bill's lines, if anything */
+function validateMissing(sale: Sale, missing: Record<string, number>): string | null {
+  for (const [lineId, qty] of Object.entries(missing)) {
+    const line = sale.lines.find((l) => l.id === lineId);
+    if (!line) return `One of the reduced items isn't on ${sale.saleNo}.`;
+    if (!Number.isInteger(qty) || qty < 0 || qty > line.qty + line.freeQty)
+      return `Qty reduced on ${line.sapCode} (${sale.saleNo}) must be a whole number from 0 to ${line.qty + line.freeQty}.`;
+  }
+  return null;
+}
 /** What a bill holds out of stock in its current status */
 const outMoves = (sale: Sale): StockMove[] => (sale.status === "Delivered" ? deliveredMoves(sale.lines) : stockIsOut(sale) ? loadMoves(sale.lines) : []);
 
@@ -415,9 +453,13 @@ function validateSale(input: SaleInput, items: Item[], shops: Shop[], sales: Sal
     if (!l.locationNumber) return `Choose the stock location for ${l.sapCode}.`;
     const takenOff = l.takenOff ?? 0;
     if (!Number.isInteger(takenOff) || takenOff < 0) return `Qty taken off ${l.sapCode} must be a whole number, 0 or more.`;
-    // 0 only for an item taken off the bill on Raigam (kept to show as on Raigam's bill)
-    if (!Number.isInteger(l.qty) || l.qty < 0 || (l.qty === 0 && takenOff === 0)) return `Quantity for ${l.sapCode} must be a whole number above 0.`;
+    if (!Number.isInteger(l.qty) || l.qty < 0) return `Quantity for ${l.sapCode} must be a whole number, 0 or more.`;
     if (!Number.isInteger(l.freeQty) || l.freeQty < 0) return `Free issue qty for ${l.sapCode} must be a whole number, 0 or more.`;
+    // Qty 0 only for a free item (free issue only) or an item taken off the bill on Raigam (kept to show as on Raigam's bill)
+    if (l.qty === 0 && l.freeQty === 0 && takenOff === 0) return `Enter a qty or a free issue qty for ${l.sapCode}.`;
+    if (l.missingQty !== undefined && (!Number.isInteger(l.missingQty) || l.missingQty < 0 || l.missingQty > l.qty + l.freeQty))
+      return `Qty reduced on ${l.sapCode} must be a whole number from 0 to ${l.qty + l.freeQty}.`;
+    if ((l.note?.length ?? 0) > 300) return `The note on ${l.sapCode} is too long (300 characters at most).`;
     if (!Number.isFinite(l.unitPrice) || l.unitPrice < 0) return `Unit price for ${l.sapCode} must be 0 or more.`;
     if (!(l.discountPct >= 0 && l.discountPct <= 100)) return `Discount for ${l.sapCode} must be a % from 0 to 100.`;
     const key = `${l.sapCode}|${l.locationNumber}`;
@@ -441,20 +483,30 @@ function cleanSale(
   existing?: Sale,
 ): Omit<Sale, "id" | "saleNo" | "status" | "late" | "loadedDate" | "vehicleNumber" | "deliveredDate" | "checked" | "deliveryNote" | "extraCredit"> {
   const savedCost = new Map(existing?.lines.map((l) => [l.sapCode, l.costPrice]));
-  // Editing a delivered bill keeps what was cancelled at delivery
-  const savedCancel = new Map(existing?.lines.map((l) => [`${l.sapCode}|${l.locationNumber}`, l.cancelQty]));
-  const lines: SaleLine[] = input.lines.map((l) => ({
-    id: newId(),
-    sapCode: l.sapCode,
-    locationNumber: l.locationNumber,
-    qty: l.qty,
-    freeQty: l.freeQty,
-    takenOff: l.takenOff ?? 0,
-    unitPrice: round2(l.unitPrice),
-    discountPct: round2(l.discountPct),
-    cancelQty: Math.min(savedCancel.get(`${l.sapCode}|${l.locationNumber}`) ?? 0, l.qty),
-    costPrice: savedCost.get(l.sapCode) ?? items.find((i) => i.sapCode === l.sapCode)?.costPrice ?? 0,
-  }));
+  // Editing a loaded or delivered bill keeps what was missing at loading and cancelled at delivery
+  const savedLine = new Map(existing?.lines.map((l) => [`${l.sapCode}|${l.locationNumber}`, l]));
+  const lines: SaleLine[] = input.lines.map((l) => {
+    const saved = savedLine.get(`${l.sapCode}|${l.locationNumber}`);
+    const takenOff = l.takenOff ?? 0;
+    // Kept unless given; taken off on Raigam after it was marked missing here: the same units, so they aren't taken off twice
+    const missingQty =
+      l.missingQty ?? Math.min(Math.max(0, (saved?.missingQty ?? 0) - Math.max(0, takenOff - (saved?.takenOff ?? 0))), l.qty + l.freeQty);
+    return {
+      id: newId(),
+      sapCode: l.sapCode,
+      locationNumber: l.locationNumber,
+      qty: l.qty,
+      freeQty: l.freeQty,
+      takenOff,
+      missingQty,
+      note: (l.note ?? saved?.note ?? "").trim(),
+      freeWith: l.freeWith ?? saved?.freeWith ?? "",
+      unitPrice: round2(l.unitPrice),
+      discountPct: round2(l.discountPct),
+      cancelQty: Math.min(saved?.cancelQty ?? 0, l.qty - Math.min(missingQty, l.qty)),
+      costPrice: savedCost.get(l.sapCode) ?? items.find((i) => i.sapCode === l.sapCode)?.costPrice ?? 0,
+    };
+  });
   const returns = cleanReturns(input.returns, items, existing?.returns);
   const discountPercent = round2(input.discountPercent);
   return {
@@ -468,6 +520,33 @@ function cleanSale(
     discount: billDiscount(saleSubtotal({ lines, returns }), discountPercent),
   };
 }
+
+/** A bill line as the bill form sends it (what was missing and cancelled is kept by cleanSale) */
+const lineInputOf = (l: SaleLine): SaleLineInput => ({
+  sapCode: l.sapCode,
+  locationNumber: l.locationNumber,
+  qty: l.qty,
+  freeQty: l.freeQty,
+  takenOff: l.takenOff,
+  unitPrice: l.unitPrice,
+  discountPct: l.discountPct,
+});
+
+/** A return item as the bill form sends it */
+const returnInputOf = (r: SaleReturn): SaleReturnInput => ({ kind: r.kind, sapCode: r.sapCode, qty: r.qty, unitPrice: r.unitPrice });
+
+/** A saved bill as the bill form sends it, with these lines (and return items) */
+const saleInputOf = (sale: Sale, lines: SaleLineInput[], returns = sale.returns.map(returnInputOf)): SaleInput => ({
+  date: sale.date,
+  shopId: sale.shopId,
+  repName: sale.repName,
+  dueDate: sale.dueDate,
+  notes: sale.notes,
+  invoiceNo: sale.invoiceNo,
+  discountPercent: sale.discountPercent,
+  lines,
+  returns,
+});
 
 function validateExpense(input: ExpenseInput): string | null {
   if (!input.date) return "Expense date is required.";
@@ -553,11 +632,20 @@ const cleanItem = (input: ItemInput): ItemInput => ({
   wholesalePrice: round2(input.wholesalePrice),
   retailPrice: round2(input.retailPrice),
   locationNumber: input.locationNumber ?? "",
+  // Upper case, like the sheet's headings, so "Blue Pack Soya" and "BLUE PACK SOYA" are one section
+  sheetSection: (input.sheetSection ?? "").trim().toUpperCase(),
+  sheetNo: input.sheetNo || 0,
 });
 
 /** An item's location may be left unset, but if given it must exist */
 const validItemLocation = (locations: StoreLocation[], input: ItemInput) =>
   !input.locationNumber || locations.some((l) => l.locationNumber === input.locationNumber);
+
+function validateItem(locations: StoreLocation[], input: ItemInput): string | null {
+  if (!validItemLocation(locations, input)) return `Location ${input.locationNumber} doesn't exist.`;
+  if (!isWholeNumber(input.sheetNo || 0)) return "Order sheet SN must be a whole number.";
+  return null;
+}
 
 function validateOrderPayment(p: OrderPayment): string | null {
   if (!p.paymentMethod) return null;
@@ -590,6 +678,8 @@ function cleanOrder(input: OrderInput): OrderInput {
     discountPercent: round2(input.discountPercent || 0),
     // A received time without a received date is meaningless
     receivedTime: input.receivedDate ? input.receivedTime : "",
+    territory: (input.territory ?? "").trim(),
+    requiredDate: input.requiredDate ?? "",
   };
 }
 
@@ -610,13 +700,15 @@ export const createCore =
     addItem: (input) => {
       const sapCode = input.sapCode.trim().toUpperCase();
       if (get().items.some((i) => i.sapCode === sapCode)) return fail(`SAP code ${sapCode} already exists.`);
-      if (!validItemLocation(get().locations, input)) return fail(`Location ${input.locationNumber} doesn't exist.`);
+      const err = validateItem(get().locations, input);
+      if (err) return fail(err);
       const item: Item = { ...cleanItem(input), sapCode, id: newId() };
       set((s) => ({ items: [...s.items, item] }));
       return ok(item.id);
     },
     updateItem: (id, input) => {
-      if (!validItemLocation(get().locations, input)) return fail(`Location ${input.locationNumber} doesn't exist.`);
+      const err = validateItem(get().locations, input);
+      if (err) return fail(err);
       // SAP code is the key other tables reference, so it is not editable
       set((s) => ({
         items: s.items.map((i) =>
@@ -880,6 +972,8 @@ export const createCore =
         ).total,
         discountPercent,
         postedToStock: true,
+        territory: "",
+        requiredDate: "",
       };
       const stock = receiveIntoStock(
         get().stock,
@@ -1095,25 +1189,117 @@ export const createCore =
       }));
       return ok();
     },
+    saveBillItem: (saleId, lineId, input) => {
+      const data = get();
+      const sale = data.sales.find((s) => s.id === saleId);
+      if (!sale) return fail("Order not found.");
+      const line = lineId ? sale.lines.find((l) => l.id === lineId) : undefined;
+      if (lineId && !line) return fail(`That item isn't on ${sale.saleNo} any more. Reload the page.`);
+      // Missing items are marked before delivery; at delivery the store's cancelled qty is used instead
+      if (sale.status === "Delivered" && input.missingQty !== (line?.missingQty ?? 0))
+        return fail(`${sale.saleNo} is delivered. Undo the delivery to reduce or remove items.`);
+      const { otherFree, ...fields } = input;
+      let lines: SaleLineInput[];
+      if (line) {
+        const edited = { ...lineInputOf(line), ...fields, sapCode: line.sapCode, takenOff: fields.takenOff ?? line.takenOff };
+        lines = sale.lines.map((l) => (l.id === line.id ? edited : lineInputOf(l)));
+      } else {
+        // A new item (sold, or a free issue item), from the item's own stock location
+        if (!data.items.some((i) => i.sapCode === input.sapCode)) return fail("Pick the item.");
+        if (sale.lines.some((l) => l.sapCode === input.sapCode)) return fail(`${input.sapCode} is already on ${sale.saleNo}. Change it on its own row.`);
+        const locationNumber = stockLocationFor(input.sapCode, data);
+        if (!locationNumber) return fail(`${input.sapCode} has no stock location yet. Set it on the Items page.`);
+        lines = [...sale.lines.map(lineInputOf), { ...fields, locationNumber, takenOff: 0 }];
+      }
+
+      // Free issue of another item given with this one: replaces the one linked to it before (null = none)
+      const mainCode = line?.sapCode ?? fields.sapCode;
+      if (otherFree !== undefined && (line || fields.qty > 0)) {
+        const linked = line ? sale.lines.find((l) => l.freeWith === mainCode && l.id !== line.id) : undefined;
+        if (linked) lines = lines.filter((l) => l.sapCode !== linked.sapCode);
+        if (otherFree) {
+          const freeItem = data.items.find((i) => i.sapCode === otherFree.sapCode);
+          if (!freeItem) return fail("Pick the other free issue item.");
+          if (otherFree.sapCode === mainCode) return fail("For the same item, use its Free Issue box. Pick another item here.");
+          if (!Number.isInteger(otherFree.freeQty) || otherFree.freeQty <= 0) return fail(`Free qty for ${freeItem.description} must be a whole number above 0.`);
+          if (lines.some((l) => l.sapCode === otherFree.sapCode))
+            return fail(`${freeItem.description} is already on ${sale.saleNo}. Give its free issue on its own row.`);
+          const same = linked?.sapCode === otherFree.sapCode ? linked : undefined;
+          const locationNumber = same?.locationNumber ?? stockLocationFor(otherFree.sapCode, data);
+          if (!locationNumber) return fail(`${freeItem.description} has no stock location yet. Set it on the Items page.`);
+          lines.push({
+            sapCode: otherFree.sapCode,
+            locationNumber,
+            qty: 0,
+            freeQty: otherFree.freeQty,
+            takenOff: 0,
+            // Valued at the wholesale price (what Raigam pays back), unless it was on the bill at another price
+            unitPrice: same?.unitPrice ?? freeItem.wholesalePrice,
+            discountPct: 0,
+            freeWith: mainCode,
+          });
+        }
+      }
+      return data.updateSale(saleId, saleInputOf(sale, lines));
+    },
+    removeBillItem: (saleId, lineId) => {
+      const { sales, updateSale } = get();
+      const sale = sales.find((s) => s.id === saleId);
+      if (!sale) return fail("Order not found.");
+      const line = sale.lines.find((l) => l.id === lineId);
+      if (!line) return fail(`That item isn't on ${sale.saleNo} any more. Reload the page.`);
+      // A free issue item given with it goes too
+      const kept = sale.lines.filter((l) => l.id !== lineId && l.freeWith !== line.sapCode);
+      if (kept.length === 0) return fail(`It's the only item on ${sale.saleNo}. Delete the bill instead.`);
+      return updateSale(saleId, saleInputOf(sale, kept.map(lineInputOf)));
+    },
+    saveBillReturn: (saleId, returnId, input) => {
+      const { sales, updateSale } = get();
+      const sale = sales.find((s) => s.id === saleId);
+      if (!sale) return fail("Order not found.");
+      if (returnId && !sale.returns.some((r) => r.id === returnId)) return fail(`That return isn't on ${sale.saleNo} any more. Reload the page.`);
+      const returns = returnId
+        ? sale.returns.map((r) => (r.id === returnId ? input : returnInputOf(r)))
+        : [...sale.returns.map(returnInputOf), input];
+      return updateSale(saleId, saleInputOf(sale, sale.lines.map(lineInputOf), returns));
+    },
+    removeBillReturn: (saleId, returnId) => {
+      const { sales, updateSale } = get();
+      const sale = sales.find((s) => s.id === saleId);
+      if (!sale) return fail("Order not found.");
+      if (!sale.returns.some((r) => r.id === returnId)) return fail(`That return isn't on ${sale.saleNo} any more. Reload the page.`);
+      return updateSale(saleId, saleInputOf(sale, sale.lines.map(lineInputOf), sale.returns.filter((r) => r.id !== returnId).map(returnInputOf)));
+    },
     loadSales: (ids, input) => {
-      const { sales, stock } = get();
+      const { sales, stock, shops, payments } = get();
       if (ids.length === 0) return fail("Select at least one bill to load.");
       if (!input.date) return fail("Enter the loading date.");
       const toLoad = sales.filter((s) => ids.includes(s.id));
       const notReady = toLoad.find((s) => s.status !== "Ordered");
       if (notReady) return fail(notReady.status === "Cancelled" ? `${notReady.saleNo} is cancelled.` : `${notReady.saleNo} is already loaded.`);
-      // All or nothing: every bill must fit in the stock that's left
-      let nextStock = stock;
+      // Items not in the store: not loaded, and they come off the bill (lines left out keep what the bill has)
+      const missing = input.missing ?? {};
+      const onBills = new Set(toLoad.flatMap((s) => s.lines.map((l) => l.id)));
+      if (Object.keys(missing).some((lineId) => !onBills.has(lineId))) return fail("One of the reduced items isn't on the bills being loaded.");
       for (const sale of toLoad) {
+        const err = validateMissing(sale, Object.fromEntries(Object.entries(missing).filter(([lineId]) => sale.lines.some((l) => l.id === lineId))));
+        if (err) return fail(err);
+      }
+      // All or nothing: every bill must fit in the stock that's left
+      const loaded = new Map(toLoad.map((s) => [s.id, withMissing(s, missing)]));
+      let nextStock = stock;
+      for (const sale of loaded.values()) {
         const taken = takeFromStock(nextStock, loadMoves(sale.lines), input.date);
         if ("error" in taken) return fail(`${sale.saleNo}: ${taken.error}`);
         nextStock = taken.stock;
       }
       const vehicleNumber = input.vehicleNumber.trim().toUpperCase();
-      set((s) => ({
-        stock: nextStock,
-        sales: s.sales.map((x) => (ids.includes(x.id) ? { ...x, status: "Loaded" as const, loadedDate: input.date, vehicleNumber } : x)),
-      }));
+      const nextSales = sales.map((x) => {
+        const sale = loaded.get(x.id);
+        return sale ? { ...sale, status: "Loaded" as const, loadedDate: input.date, vehicleNumber } : x;
+      });
+      // A bill made smaller by missing items can leave money paid in advance over it: that stays with the store as an advance
+      set({ stock: nextStock, sales: nextSales, payments: normalizeAllocations(shops, nextSales, payments) });
       return ok();
     },
     unloadSale: (id) => {
@@ -1124,6 +1310,29 @@ export const createCore =
         stock: returnToStock(s.stock, loadMoves(sale.lines), getToday()),
         sales: s.sales.map((x) => (x.id === id ? { ...x, status: "Ordered" as const, loadedDate: "", vehicleNumber: "" } : x)),
       }));
+      return ok(id);
+    },
+    markMissing: (id, missing) => {
+      const { sales, stock, shops, payments } = get();
+      const sale = sales.find((s) => s.id === id);
+      if (!sale) return fail("Order not found.");
+      if (sale.status === "Cancelled") return fail(`${sale.saleNo} is cancelled.`);
+      if (sale.status === "Delivered")
+        return fail(`${sale.saleNo} is delivered. Undo the delivery to reduce or remove items (or cancel items when delivering).`);
+      const err = validateMissing(sale, missing);
+      if (err) return fail(err);
+      const next = withMissing(sale, missing);
+      // On the lorry already: units now missing go back into stock, units found again come out of it
+      let nextStock = stock;
+      if (sale.status === "Loaded") {
+        const today = getToday();
+        const taken = takeFromStock(returnToStock(stock, loadMoves(sale.lines), today), loadMoves(next.lines), today);
+        if ("error" in taken) return fail(taken.error);
+        nextStock = taken.stock;
+      }
+      const nextSales = sales.map((x) => (x.id === id ? next : x));
+      // A smaller bill can leave money paid in advance over it: that stays with the store as an advance
+      set({ stock: nextStock, sales: nextSales, payments: normalizeAllocations(shops, nextSales, payments) });
       return ok(id);
     },
     deliverSale: (id, input) => {
@@ -1147,8 +1356,10 @@ export const createCore =
       for (const [lineId, qty] of Object.entries(cancels)) {
         const line = sale.lines.find((l) => l.id === lineId);
         if (!line) return fail("One of the cancelled items isn't on this bill.");
-        if (!Number.isInteger(qty) || qty < 0 || qty > line.qty)
-          return fail(`Cancelled qty for ${line.sapCode} must be a whole number from 0 to ${line.qty}.`);
+        // Units missing at loading never reached the store
+        const delivered = line.qty - missingSold(line);
+        if (!Number.isInteger(qty) || qty < 0 || qty > delivered)
+          return fail(`Cancelled qty for ${line.sapCode} must be a whole number from 0 to ${delivered}.`);
       }
       // The return items entered with the bill, as checked at the store (left out = keep them).
       // From now on they're held for Raigam in the return items store, not stock.
