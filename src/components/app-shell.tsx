@@ -312,7 +312,8 @@ export function AppShell({ children }: { children: ReactNode }) {
           Saving…
         </div>
       )}
-      <Toaster position="top-right" richColors closeButton />
+      {/* Bottom: the pages' buttons are in the bar at the top, and a message mustn't cover them */}
+      <Toaster position="bottom-center" richColors closeButton />
     </div>
   );
 }

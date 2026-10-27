@@ -1,10 +1,11 @@
 "use client";
 
 import { AlertTriangle, Pencil, Plus, Trash2 } from "lucide-react";
-import Link from "next/link";
 import { useMemo, useState, type FormEvent, type KeyboardEvent } from "react";
 import { toast } from "sonner";
-import { Button, buttonClass } from "@/components/ui/button";
+import { PaymentFormDialog } from "@/components/payments/payment-form-dialog";
+import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { ShopFormDialog } from "@/components/shops/shop-form-dialog";
 import { Field, Input, ReadOnlyValue, toNumber } from "@/components/ui/form";
 import { SearchSelect } from "@/components/ui/search-select";
@@ -25,7 +26,7 @@ import {
   stockIsOut,
 } from "@/lib/ledger";
 import { useAppStore, useItemMap, useItemPickOptions, useRouteMap, useSaleDues, useShopBalances } from "@/lib/store";
-import type { Sale, SaleInput, SaleLine, Shop } from "@/lib/types";
+import type { Payment, Sale, SaleInput, SaleLine, Shop } from "@/lib/types";
 import { addDays, cn, formatDate, formatMoney, formatQty, newId, nextCode, round2, todayISO } from "@/lib/utils";
 import { AddPaymentButton, BillPaymentDialog, BillPaymentList, type BillPaymentRow } from "./bill-payment-dialog";
 import { blankReturn, pricedReturn, ReturnPanel, returnsInput, returnStarted, ReturnTable, toReturnDrafts, type ReturnDraft } from "./return-items";
@@ -102,16 +103,17 @@ function SavedLineNotes({ line }: { line?: SaleLine }) {
 /** The free issue item given with an item (its free line linked to it), if any */
 const linkedFree = (lines: LineDraft[], sapCode: string) => (sapCode ? lines.find((l) => l.freeWith === sapCode && isFreeLine(l)) : undefined);
 
+/** The bill's <form>: its Save button is in the page's top bar (form={SALE_FORM_ID}) */
+export const SALE_FORM_ID = "sale-form";
+
 export function SaleForm({
   sale,
   defaultShopId,
   onSaved,
-  cancelHref,
 }: {
   sale: Sale | null;
   defaultShopId?: string;
   onSaved: (id: string) => void;
-  cancelHref: string;
 }) {
   const shops = useAppStore((s) => s.shops);
   const routes = useAppStore((s) => s.routes);
@@ -181,6 +183,13 @@ export function SaleForm({
   const [payOpen, setPayOpen] = useState(false);
   const allPayments = useAppStore((s) => s.payments);
   const savedDue = useSaleDues().get(sale?.id ?? "");
+  // Saved bill: its payments are added, changed and deleted straight away, as on the bill's page
+  const addPayment = useAppStore((s) => s.addPayment);
+  const deletePayment = useAppStore((s) => s.deletePayment);
+  const [editingPayment, setEditingPayment] = useState<Payment | null>(null);
+  const [removingPayment, setRemovingPayment] = useState<Payment | null>(null);
+  // Still to pay on the saved bill: its balance once delivered, before that its total less what's paid
+  const savedLeft = savedDue ? round2(savedDue.delivered ? savedDue.due : savedDue.total - savedDue.paid) : 0;
 
   // When editing a loaded/delivered bill, what it already holds out of stock counts as available
   const available = useMemo(() => {
@@ -211,9 +220,11 @@ export function SaleForm({
   const draftItem = itemMap.get(draftCode);
   const editingIndex = lines.findIndex((l) => l.key === editingKey);
 
-  // Store balance without this order (when editing a delivered one) so it isn't counted twice
+  // Editing: the store's balance already has this bill (once delivered) and what's been paid on it,
+  // so both are taken out to get the old balance; they're added back as their own lines
+  const sameStore = !!sale && sale.shopId === shop?.id;
   const balanceBefore = shop
-    ? round2((balances.get(shop.id)?.balance ?? 0) - (sale && delivered && sale.shopId === shop.id ? amountOwed(sale) : 0))
+    ? round2((balances.get(shop.id)?.balance ?? 0) - (sameStore && delivered ? amountOwed(sale) : 0) + (sameStore ? (savedDue?.paid ?? 0) : 0))
     : 0;
   // Payments already on this bill (editing) or added to the new bill here
   const savedPayments: BillPaymentRow[] = (savedDue?.payments ?? []).map((p) => {
@@ -234,7 +245,9 @@ export function SaleForm({
   const paidRows = sale ? savedPayments : paidWithOrder;
   const paidTotal = round2(paidRows.reduce((sum, p) => sum + p.amount, 0));
   const leftToCollect = round2(total - paidTotal);
-  const balanceAfter = round2(balanceBefore + total - (sale ? 0 : paidTotal));
+  // Paid on this bill so far (a cheque still to collect isn't paid yet), or with the new bill
+  const paidOnBill = sale ? (sameStore ? (savedDue?.paid ?? 0) : 0) : paidTotal;
+  const balanceAfter = round2(balanceBefore + total - paidOnBill);
   const overLimit = shop ? balanceAfter > shop.creditLimit : false;
   // The store's other bills not delivered yet: not owed yet, so not in the balance
   const waiting = shop ? sales.filter((s) => s.shopId === shop.id && (s.status === "Ordered" || s.status === "Loaded") && s.id !== sale?.id) : [];
@@ -491,7 +504,8 @@ export function SaleForm({
     else if (!sale && paidTotal > total + 0.004)
       error = `The payments added (${formatMoney(paidTotal)}) are more than the bill (${formatMoney(total)}). Remove one or change the items.`;
     setFormError(error);
-    if (error) return;
+    // Also as a message: the Save button is at the top, the error box at the bottom
+    if (error) return void toast.error(error);
 
     const input: SaleInput = {
       date,
@@ -547,7 +561,7 @@ export function SaleForm({
 
   return (
     <>
-      <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-6">
+      <form id={SALE_FORM_ID} onSubmit={handleSubmit} noValidate className="flex flex-col gap-6">
         <Card>
           <CardHeader
             title="Bill details"
@@ -1247,14 +1261,25 @@ export function SaleForm({
                 <div>
                   <p className="font-medium text-slate-900">{sale ? "Payments on this bill" : "Paid with the order"}</p>
                   <p className="text-xs text-slate-500">
-                    {sale ? "Add or change payments on the bill's page." : "Cash or a cheque the store gives now. One bill can have several payments."}
+                    {sale
+                      ? "Saved straight away (no need to press Save changes). One bill can have several payments."
+                      : "Cash or a cheque the store gives now. One bill can have several payments."}
                   </p>
                 </div>
-                {!sale && <AddPaymentButton onClick={() => setPayOpen(true)} disabled={leftToCollect <= 0.004} />}
+                {sale ? (
+                  sale.status !== "Cancelled" && <AddPaymentButton onClick={() => setPayOpen(true)} disabled={savedLeft <= 0.004} />
+                ) : (
+                  <AddPaymentButton onClick={() => setPayOpen(true)} disabled={leftToCollect <= 0.004} />
+                )}
               </div>
               <BillPaymentList
                 rows={paidRows}
-                onRemove={sale ? undefined : (key) => setPaidWithOrder((ps) => ps.filter((p) => p.key !== key))}
+                onEdit={sale ? (key) => setEditingPayment(allPayments.find((p) => p.id === key) ?? null) : undefined}
+                onRemove={
+                  sale
+                    ? (key) => setRemovingPayment(allPayments.find((p) => p.id === key) ?? null)
+                    : (key) => setPaidWithOrder((ps) => ps.filter((p) => p.key !== key))
+                }
                 className="mt-2"
               />
             </div>
@@ -1268,10 +1293,10 @@ export function SaleForm({
                   <span className="text-slate-600">This bill</span>
                   <span className="tabular-nums">{formatMoney(total)}</span>
                 </div>
-                {!sale && paidTotal > 0 && (
+                {paidOnBill > 0 && (
                   <div className="mt-1.5 flex justify-between">
-                    <span className="text-slate-600">Paid with the order</span>
-                    <span className="text-emerald-700 tabular-nums">− {formatMoney(paidTotal)}</span>
+                    <span className="text-slate-600">{sale ? "Paid on this bill" : "Paid with the order"}</span>
+                    <span className="text-emerald-700 tabular-nums">− {formatMoney(paidOnBill)}</span>
                   </div>
                 )}
                 <div className="mt-1.5 flex justify-between">
@@ -1308,16 +1333,8 @@ export function SaleForm({
                 still save, but consider collecting cash.
               </p>
             )}
-            {/* Next to the button, so it's seen on a phone too (the box it's about is marked red) */}
+            {/* Under the totals too (the box it's about is marked red) */}
             {formError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{formError}</p>}
-            <div className="mt-2 flex gap-2 sm:justify-end">
-              <Link href={cancelHref} className={buttonClass("outline", "md", "flex-1 sm:flex-none")}>
-                Cancel
-              </Link>
-              <Button type="submit" className="flex-1 sm:flex-none">
-                {sale ? "Save changes" : "Create bill"}
-              </Button>
-            </div>
           </div>
         </Card>
       </form>
@@ -1346,6 +1363,41 @@ export function SaleForm({
             return null;
           }}
         />
+      )}
+      {sale && (
+        <>
+          <BillPaymentDialog
+            title={`Add payment · ${sale.saleNo}`}
+            description="Saved to the bill straight away."
+            left={savedLeft}
+            balanceLabel={delivered ? "Balance on credit" : "To collect after delivery"}
+            open={payOpen}
+            onClose={() => setPayOpen(false)}
+            onSave={async (payment) => {
+              const result = await addPayment({ ...payment, shopId: sale.shopId, allocations: [{ saleId: sale.id, amount: payment.amount }] });
+              if (!result.ok) return result.error;
+              const after = round2(savedLeft - payment.amount);
+              toast.success(`${formatMoney(payment.amount)} ${payment.method.toLowerCase()} added to ${sale.saleNo}${after > 0 ? ` · ${formatMoney(after)} left` : " · fully paid"}`);
+              return null;
+            }}
+          />
+          <PaymentFormDialog open={!!editingPayment} payment={editingPayment} onClose={() => setEditingPayment(null)} />
+          <ConfirmDialog
+            open={!!removingPayment}
+            onClose={() => setRemovingPayment(null)}
+            title={`Delete payment ${removingPayment?.receiptNo ?? ""}?`}
+            message={`${formatMoney(removingPayment?.amount ?? 0)} comes off what was paid${
+              (removingPayment?.allocations.length ?? 0) > 1 ? " on this and the other bills it covered" : ""
+            }, so ${sale.saleNo}'s balance goes back up.`}
+            onConfirm={async () => {
+              if (!removingPayment) return;
+              const result = await deletePayment(removingPayment.id);
+              if (result.ok) toast.success(`Payment ${removingPayment.receiptNo} deleted`);
+              else toast.error(result.error);
+              setRemovingPayment(null);
+            }}
+          />
+        </>
       )}
     </>
   );

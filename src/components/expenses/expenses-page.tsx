@@ -1,10 +1,11 @@
 "use client";
 
 import { Pencil, Plus, Trash2 } from "lucide-react";
-import { useMemo, useState, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { DateRangePicker, inDateRange, type DateRange } from "@/components/ui/date-range-picker";
 import { Field, Input, ReadOnlyValue, Select, toNumber } from "@/components/ui/form";
 import { Card, FilterTabs, PageHeader, SearchInput, TableFooter, Toolbar } from "@/components/ui/layout";
 import { Modal } from "@/components/ui/modal";
@@ -13,10 +14,7 @@ import { EmptyRow, RowActions, Table, TBody, TD, TH, THead, TR } from "@/compone
 import { useAppStore } from "@/lib/store";
 import { EXPENSE_CATEGORIES, PAYMENT_METHODS, type Expense, type ExpenseCategory, type PaymentMethod } from "@/lib/types";
 import { useDialog } from "@/lib/use-dialog";
-import { formatDate, formatMoney, includesText, nextCode, todayISO } from "@/lib/utils";
-
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-const monthLabel = (ym: string) => `${MONTHS[Number(ym.slice(5, 7)) - 1]} ${ym.slice(0, 4)}`;
+import { formatDate, formatMoney, includesText, monthEndISO, monthStartISO, nextCode, todayISO } from "@/lib/utils";
 
 type Values = { date: string; category: ExpenseCategory; description: string; amount: string; method: PaymentMethod };
 
@@ -100,26 +98,21 @@ export function ExpensesPage() {
   const expenses = useAppStore((s) => s.expenses);
   const deleteExpense = useAppStore((s) => s.deleteExpense);
   const [query, setQuery] = useState("");
-  const [month, setMonth] = useState(() => todayISO().slice(0, 7));
+  // All of this month to start with
+  const [range, setRange] = useState<DateRange>(() => ({ from: monthStartISO(), to: monthEndISO() }));
   const [category, setCategory] = useState("");
   const form = useDialog<Expense | "new">();
   const remove = useDialog<Expense>();
 
-  const months = useMemo(() => {
-    const set = new Set(expenses.map((e) => e.date.slice(0, 7)));
-    set.add(todayISO().slice(0, 7));
-    return [...set].sort().reverse();
-  }, [expenses]);
-
   const rows = expenses
-    .filter((e) => !month || e.date.startsWith(month))
+    .filter((e) => inDateRange(e.date, range))
     .filter((e) => !category || e.category === category)
     .filter((e) => includesText([e.expenseNo, e.category, e.description], query))
     .sort((a, b) => b.date.localeCompare(a.date) || b.expenseNo.localeCompare(a.expenseNo));
   const total = rows.reduce((sum, e) => sum + e.amount, 0);
   const editing = form.target === "new" ? null : form.target;
 
-  const pager = usePagination(rows, [query, month, category]);
+  const pager = usePagination(rows, [query, range, category]);
 
   return (
     <>
@@ -136,14 +129,7 @@ export function ExpensesPage() {
       <Card>
         <Toolbar>
           <SearchInput placeholder="Search description or category" value={query} onChange={(e) => setQuery(e.target.value)} />
-          <Select value={month} onChange={(e) => setMonth(e.target.value)} className="h-9 sm:w-40" aria-label="Filter by month">
-            <option value="">All months</option>
-            {months.map((m) => (
-              <option key={m} value={m}>
-                {monthLabel(m)}
-              </option>
-            ))}
-          </Select>
+          <DateRangePicker value={range} onChange={setRange} />
           <Select value={category} onChange={(e) => setCategory(e.target.value)} className="h-9 sm:w-48" aria-label="Filter by category">
             <option value="">All categories</option>
             {EXPENSE_CATEGORIES.map((c) => (
@@ -168,7 +154,7 @@ export function ExpensesPage() {
             </tr>
           </THead>
           <TBody>
-            {rows.length === 0 && <EmptyRow colSpan={7}>No expenses{month ? ` in ${monthLabel(month)}` : ""}.</EmptyRow>}
+            {rows.length === 0 && <EmptyRow colSpan={7}>No expenses{range.from ? " for these dates" : ""}.</EmptyRow>}
             {pager.pageRows.map((e) => (
               <TR key={e.id}>
                 <TD className="font-semibold text-slate-900">{e.expenseNo}</TD>

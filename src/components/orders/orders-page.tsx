@@ -8,8 +8,9 @@ import { toast } from "sonner";
 import { OrderStatusBadge } from "@/components/ui/badge";
 import { Button, buttonClass } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { DateRangePicker, inDateRange, type DateRange } from "@/components/ui/date-range-picker";
 import { Select } from "@/components/ui/form";
-import { Card, DateRangeInputs, FilterTabs, inDateRange, PageHeader, SearchInput, TableFooter, Toolbar, type DateRange } from "@/components/ui/layout";
+import { Card, FilterTabs, PageHeader, SearchInput, TableFooter, Toolbar } from "@/components/ui/layout";
 import { Pagination, usePagination } from "@/components/ui/pagination";
 import { EmptyRow, RowActions, Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { useAppStore } from "@/lib/store";
@@ -73,7 +74,7 @@ export function OrdersPage() {
       <Card>
         <Toolbar>
           <SearchInput placeholder="Search order, invoice, PO or cheque no." value={query} onChange={(e) => setQuery(e.target.value)} />
-          <DateRangeInputs value={range} onChange={setRange} />
+          <DateRangePicker value={range} onChange={setRange} />
           <Select value={dateBy} onChange={(e) => setDateBy(e.target.value as DateBy)} className="h-9 sm:w-44" aria-label="Which date to use">
             <option value="order">By order date</option>
             <option value="received">By received date</option>

@@ -7,8 +7,9 @@ import { toast } from "sonner";
 import { ChequeStatusBadge } from "@/components/payments/cheque-status-field";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { DateRangePicker, inDateRange, type DateRange } from "@/components/ui/date-range-picker";
 import { Select } from "@/components/ui/form";
-import { Card, CardHeader, DateRangeInputs, FilterTabs, inDateRange, PageHeader, SearchInput, SummaryTile, TableFooter, Toolbar, type DateRange } from "@/components/ui/layout";
+import { Card, CardHeader, FilterTabs, PageHeader, SearchInput, SummaryTile, TableFooter, Toolbar } from "@/components/ui/layout";
 import { Pagination, usePagination } from "@/components/ui/pagination";
 import { EmptyRow, Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { isPaid } from "@/lib/ledger";
@@ -154,7 +155,7 @@ export function ChequesPage() {
       />
       <Card>
         <Toolbar>
-          <DateRangeInputs value={range} onChange={setRange} />
+          <DateRangePicker value={range} onChange={setRange} />
           <Select value={dateBy} onChange={(e) => setDateBy(e.target.value as DateBy)} className="h-9 sm:w-60" aria-label="Which date the range is for">
             {(Object.keys(DATE_BY_LABELS) as DateBy[]).map((k) => (
               <option key={k} value={k}>

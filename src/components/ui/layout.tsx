@@ -1,9 +1,8 @@
-import { ArrowLeft, Search, X } from "lucide-react";
+import { ArrowLeft, Search } from "lucide-react";
 import Link from "next/link";
 import type { ComponentProps, ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { buttonClass } from "./button";
-import { Input } from "./form";
 
 export function BackLink({ href, children }: { href: string; children: ReactNode }) {
   return (
@@ -112,51 +111,6 @@ export function Toolbar({ children }: { children: ReactNode }) {
       {children}
     </div>
   );
-}
-
-export type DateRange = { from: string; to: string };
-
-/** From / to date filter (ISO dates); an empty side means no limit */
-export function DateRangeInputs({ value, onChange }: { value: DateRange; onChange: (range: DateRange) => void }) {
-  return (
-    // min-w-0: on phones the two date boxes share the width instead of poking past the edge
-    <div className="flex w-full items-center gap-2 sm:w-auto">
-      <Input
-        type="date"
-        value={value.from}
-        max={value.to || undefined}
-        onChange={(e) => onChange({ ...value, from: e.target.value })}
-        className="h-9 min-w-0 flex-1 sm:w-40 sm:flex-none"
-        aria-label="From date"
-      />
-      <span className="text-sm text-slate-500">to</span>
-      <Input
-        type="date"
-        value={value.to}
-        min={value.from || undefined}
-        onChange={(e) => onChange({ ...value, to: e.target.value })}
-        className="h-9 min-w-0 flex-1 sm:w-40 sm:flex-none"
-        aria-label="To date"
-      />
-      {(value.from || value.to) && (
-        <button
-          type="button"
-          onClick={() => onChange({ from: "", to: "" })}
-          className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
-          aria-label="Clear dates"
-          title="Clear dates"
-        >
-          <X className="size-4" />
-        </button>
-      )}
-    </div>
-  );
-}
-
-/** True when an ISO date is inside the range; with any limit set, a missing date is outside */
-export function inDateRange(iso: string, { from, to }: DateRange) {
-  if (!from && !to) return true;
-  return !!iso && (!from || iso >= from) && (!to || iso <= to);
 }
 
 export function SearchInput({ className, ...props }: ComponentProps<"input">) {

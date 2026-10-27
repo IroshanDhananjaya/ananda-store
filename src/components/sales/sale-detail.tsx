@@ -1,6 +1,6 @@
 "use client";
 
-import { Ban, CalendarClock, Gift, HandCoins, PackageOpen, Pencil, Plus, Printer, RotateCcw, Trash2, Truck, Undo2 } from "lucide-react";
+import { Ban, CalendarClock, ChevronDown, Clock, Ellipsis, Gift, HandCoins, PackageCheck, PackageMinus, PackageOpen, Pencil, Plus, Printer, RotateCcw, Trash2, Truck, Undo2 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Fragment, type ReactNode } from "react";
@@ -10,7 +10,9 @@ import { PaymentFormDialog } from "@/components/payments/payment-form-dialog";
 import { BillStatusBadge, DueDateLabel } from "@/components/ui/badge";
 import { Button, buttonClass } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { BackLink, Card, CardHeader, Detail, PageHeader } from "@/components/ui/layout";
+import { BackLink, Card, CardHeader } from "@/components/ui/layout";
+import { Menu, type MenuEntry } from "@/components/ui/menu";
+import { StickyHeader } from "@/components/ui/sticky-header";
 import { EmptyRow, GroupRow, Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import {
   chargedQty,
@@ -28,12 +30,12 @@ import { saleCost, saleRevenue } from "@/lib/profit";
 import { allTakenOff } from "@/lib/raigam";
 import { categoryOf, compareByCategory } from "@/lib/categories";
 import { useAppStore, useCategoryRanks, useItemMap, useRouteMap, useSaleDues, useShopBalances, useShopMap } from "@/lib/store";
-import type { Payment, SaleLine, SaleReturn } from "@/lib/types";
+import type { Payment, Sale, SaleLine, SaleReturn } from "@/lib/types";
 import { useDialog } from "@/lib/use-dialog";
 import { cn, daysUntil, formatDate, formatMoney, formatQty, round2 } from "@/lib/utils";
 import { BillItemDialog, BillReturnDialog, type AddKind } from "./bill-item-dialogs";
 import { BillPaymentDialog } from "./bill-payment-dialog";
-import { BillStatusMenu } from "./bill-status-menu";
+import { useBillStatus, type StatusChoice } from "./bill-status-menu";
 import { CheckedToggle } from "./checked-toggle";
 import { DeliverDialog } from "./deliver-dialog";
 import { LoadLorryDialog } from "./load-lorry-dialog";
@@ -89,27 +91,50 @@ function EditItemCell({ onClick, name }: { onClick: () => void; name: string }) 
   );
 }
 
-function NextStep({ icon, title, text, tone, action }: { icon: ReactNode; title: string; text: ReactNode; tone: "blue" | "red" | "amber"; action: ReactNode }) {
+/** Label / value pair in the small details strip under the bill's store, invoice number and value */
+function SmallDetail({ label, children, className }: { label: string; children: ReactNode; className?: string }) {
+  return (
+    <div className={cn("min-w-0", className)}>
+      <dt className="text-[11px] font-medium tracking-wide text-slate-500 uppercase">{label}</dt>
+      <dd className="mt-0.5 text-xs font-medium text-slate-800">{children}</dd>
+    </div>
+  );
+}
+
+/** Where the bill is up to and what to do next (its button is in the bar at the top) */
+function NextStep({ icon, title, text, tone }: { icon: ReactNode; title: string; text: ReactNode; tone: "blue" | "red" | "amber" }) {
   const tones = {
     blue: "border-sky-200 bg-sky-50 text-sky-900",
     amber: "border-amber-200 bg-amber-50 text-amber-900",
     red: "border-red-200 bg-red-50 text-red-900",
   };
   return (
-    <div className={cn("mb-6 flex flex-col gap-3 rounded-xl border px-5 py-4 sm:flex-row sm:items-center print:hidden", tones[tone])}>
+    <div className={cn("mb-6 flex items-center gap-3 rounded-xl border px-5 py-4 print:hidden", tones[tone])}>
       <span className="grid size-10 shrink-0 place-items-center rounded-full bg-white shadow-sm [&_svg]:size-5">{icon}</span>
       <div className="flex-1">
         <p className="text-sm font-semibold">{title}</p>
         <p className="text-sm opacity-90">{text}</p>
       </div>
-      {action}
     </div>
   );
 }
 
+/** Status changes in the ⋯ menu, in Raigam's words */
+const STATUS_ENTRIES: Record<Exclude<StatusChoice, "restore">, { label: string; description: string; icon: ReactNode }> = {
+  actual: { label: "Actual", description: "Mark delivered; record the money separately", icon: <PackageCheck /> },
+  late: { label: "Late Delivery", description: "Not delivered on its day; load it again", icon: <Clock /> },
+  cancel: { label: "Cancel bill", description: "The store doesn't want it; kept as a record", icon: <Ban /> },
+};
+
 export function SaleDetail({ id }: { id: string }) {
-  const router = useRouter();
   const sale = useAppStore((s) => s.sales.find((x) => x.id === id));
+  // The bill's hooks need a bill, so it's a component of its own
+  if (!sale) return <SaleNotFound />;
+  return <BillDetail sale={sale} />;
+}
+
+function BillDetail({ sale }: { sale: Sale }) {
+  const router = useRouter();
   const deleteSale = useAppStore((s) => s.deleteSale);
   const payments = useAppStore((s) => s.payments);
   const deletePayment = useAppStore((s) => s.deletePayment);
@@ -133,8 +158,7 @@ export function SaleDetail({ id }: { id: string }) {
   const removeReturn = useDialog<SaleReturn>();
   const removeBillReturn = useAppStore((s) => s.removeBillReturn);
   const removePayment = useDialog<Payment>();
-
-  if (!sale) return <SaleNotFound />;
+  const status = useBillStatus(sale);
 
   const shop = shopMap.get(sale.shopId);
   const route = shop ? routeMap.get(shop.routeId) : undefined;
@@ -162,9 +186,9 @@ export function SaleDetail({ id }: { id: string }) {
   /** The Remove tick on an item row: every unit off the bill (a red row), or all back on it */
   async function toggleRemoved(l: SaleLine) {
     const removing = !isRemoved(l);
-    const result = await markMissing(sale!.id, { [l.id]: removing ? l.qty + l.freeQty : 0 });
+    const result = await markMissing(sale.id, { [l.id]: removing ? l.qty + l.freeQty : 0 });
     const name = itemMap.get(l.sapCode)?.description ?? l.sapCode;
-    if (result.ok) toast.success(removing ? `${name} removed from ${sale!.saleNo}` : `${name} is back on ${sale!.saleNo}`);
+    if (result.ok) toast.success(removing ? `${name} removed from ${sale.saleNo}` : `${name} is back on ${sale.saleNo}`);
     else toast.error(result.error);
   }
   const returnUnits = sale.returns.reduce((n, r) => n + r.qty, 0);
@@ -187,39 +211,143 @@ export function SaleDetail({ id }: { id: string }) {
   const onCredit = d.delivered && left > 0.004 ? left : 0;
   const paymentMode = [methodsUsed, onCredit ? "Credit" : ""].filter(Boolean).join(", ");
   const daysLeft = sale.dueDate ? daysUntil(sale.dueDate) : 0;
+  const canPay = sale.status !== "Cancelled" && left > 0.004;
+  // Restore is the cancelled bill's own button, so it's not listed again
+  const statusEntries: MenuEntry[] = status.choices.flatMap((c) =>
+    c === "restore" ? [] : [{ ...STATUS_ENTRIES[c], danger: c === "cancel", onSelect: () => status.choose(c) }],
+  );
+  if (statusEntries.length) statusEntries.unshift({ heading: "Change status" });
+
+  async function restore() {
+    const result = await restoreSale(sale.id);
+    if (result.ok) toast.success(`${sale.saleNo} restored · waiting to load`);
+    else toast.error(result.error);
+  }
 
   return (
     <>
       <BackLink href="/invoices">Daily Invoices</BackLink>
-      <PageHeader
+      {/* Every button for the bill, always in reach: Add, Print, Edit, the next step, and the rest under ⋯ */}
+      <StickyHeader
         title={
           <span className="flex flex-wrap items-center gap-3">
             {sale.saleNo} <BillStatusBadge status={d.status} late={sale.late} />
           </span>
         }
-        description={`${sale.invoiceNo ? `Raigam invoice ${sale.invoiceNo} · ` : ""}${shop?.shopName ?? "Deleted store"} · ordered ${formatDate(sale.date)}${sale.repName ? ` by ${sale.repName}` : ""}`}
         actions={
-          <div className="flex flex-wrap items-center gap-2 print:hidden">
-            {!d.delivered && sale.status !== "Cancelled" && <BillStatusMenu sale={sale} className="h-10 w-40 text-sm" />}
-            <Button variant="outline" onClick={() => window.print()}>
-              <Printer /> Print
+          <>
+            <Menu
+              aria-label="Add to the bill"
+              entries={[
+                canEditItems && { label: "Item", description: "Sold on this bill", icon: <Plus />, onSelect: () => editItem.open("item") },
+                canEditItems && { label: "Free issue item", description: "Given free, Raigam pays it back", icon: <Gift />, onSelect: () => editItem.open("free") },
+                canEditItems && {
+                  label: "Return item",
+                  description: "Good or market return, credited on this bill",
+                  icon: <RotateCcw />,
+                  onSelect: () => editReturn.open("new"),
+                },
+                // Once delivered, Add payment is the next step's own button
+                canPay && !d.delivered && { label: "Payment", description: "Paid with the order or in advance", icon: <HandCoins />, onSelect: () => dialog.open("payment") },
+              ]}
+            >
+              <Plus /> Add <ChevronDown className="-mr-1 text-slate-400" />
+            </Menu>
+            {/* Icons only until the screen is wide enough for every label on one row */}
+            <Button variant="outline" className="hidden px-2.5 sm:inline-flex xl:px-4" onClick={() => window.print()} aria-label="Print" title="Print">
+              <Printer /> <span className="hidden xl:inline">Print</span>
             </Button>
-            {d.delivered && (
-              <Button variant="outline" onClick={() => dialog.open("undo")}>
-                <Undo2 /> Undo delivery
-              </Button>
-            )}
             {sale.status !== "Cancelled" && (
-              <Link href={`/sales/${sale.id}/edit`} className={buttonClass("outline")}>
-                <Pencil /> Edit
+              <Link
+                href={`/sales/${sale.id}/edit`}
+                className={buttonClass("outline", "md", "hidden px-2.5 sm:inline-flex xl:px-4")}
+                aria-label="Edit"
+                title="Edit"
+              >
+                <Pencil /> <span className="hidden xl:inline">Edit</span>
               </Link>
             )}
-            <Button variant="outline" className="text-red-600 hover:bg-red-50" onClick={() => dialog.open("delete")}>
-              <Trash2 /> Delete
+            {d.delivered && (
+              <Button
+                variant="outline"
+                className="hidden px-2.5 sm:inline-flex xl:px-4"
+                onClick={() => dialog.open("undo")}
+                aria-label="Undo delivery"
+                title="Undo delivery"
+              >
+                <Undo2 /> <span className="hidden xl:inline">Undo delivery</span>
+              </Button>
+            )}
+            <Button
+              variant="outline"
+              className="hidden px-2.5 text-red-600 hover:bg-red-50 sm:inline-flex xl:px-4"
+              onClick={() => dialog.open("delete")}
+              aria-label="Delete bill"
+              title="Delete bill"
+            >
+              <Trash2 /> <span className="hidden xl:inline">Delete</span>
             </Button>
-          </div>
+            {sale.status === "Ordered" && (
+              <>
+                <Button variant="outline" className="hidden xl:inline-flex" onClick={() => dialog.open("deliver")}>
+                  Deliver directly
+                </Button>
+                <Button className="flex-1 sm:flex-none" onClick={() => dialog.open("load")}>
+                  <Truck /> Load on lorry
+                </Button>
+              </>
+            )}
+            {sale.status === "Loaded" && (
+              <>
+                <Button variant="outline" className="hidden xl:inline-flex" onClick={() => dialog.open("unload")}>
+                  Unload
+                </Button>
+                <Button className="flex-1 sm:flex-none" onClick={() => dialog.open("deliver")}>
+                  <Truck /> <span className="sm:hidden">Deliver</span>
+                  <span className="hidden sm:inline">Deliver & collect cash</span>
+                </Button>
+              </>
+            )}
+            {d.delivered && canPay && (
+              <Button className="flex-1 sm:flex-none" onClick={() => dialog.open("payment")}>
+                <HandCoins /> Add payment
+              </Button>
+            )}
+            {sale.status === "Cancelled" && (
+              <Button className="flex-1 sm:flex-none" onClick={restore}>
+                <RotateCcw /> Restore
+              </Button>
+            )}
+            <Menu
+              aria-label="More actions"
+              title="More actions"
+              // From sm up it only holds the status changes (and the second step until xl)
+              className={cn("px-2.5", statusEntries.length === 0 && "sm:hidden")}
+              entries={[
+                ...statusEntries,
+                // The buttons that don't fit: the second step until xl; Print, Edit, Undo and Delete on phones
+                { heading: "", until: "xl" },
+                sale.status === "Ordered" && { label: "Deliver directly", description: "Without loading the lorry", icon: <Truck />, onSelect: () => dialog.open("deliver"), until: "xl" },
+                sale.status === "Loaded" && {
+                  label: "Unload",
+                  description: "Stock goes back; load it again later",
+                  icon: <PackageMinus />,
+                  onSelect: () => dialog.open("unload"),
+                  until: "xl",
+                },
+                { label: "Print", icon: <Printer />, onSelect: () => window.print(), until: "sm" },
+                sale.status !== "Cancelled" && { label: "Edit bill", icon: <Pencil />, onSelect: () => router.push(`/sales/${sale.id}/edit`), until: "sm" },
+                d.delivered && { label: "Undo delivery", description: "Back to on the lorry", icon: <Undo2 />, onSelect: () => dialog.open("undo"), until: "sm" },
+                { heading: "", until: "sm" },
+                { label: "Delete bill", icon: <Trash2 />, danger: true, onSelect: () => dialog.open("delete"), until: "sm" },
+              ]}
+            >
+              <Ellipsis />
+            </Menu>
+          </>
         }
       />
+      {status.dialogs}
 
       {sale.status === "Cancelled" && (
         <NextStep
@@ -227,18 +355,6 @@ export function SaleDetail({ id }: { id: string }) {
           icon={<Ban className="text-red-600" />}
           title="This bill is cancelled"
           text="It's kept for your records and doesn't count in sales, profit or the store's balance."
-          action={
-            <Button
-              variant="outline"
-              onClick={async () => {
-                const result = await restoreSale(sale.id);
-                if (result.ok) toast.success(`${sale.saleNo} restored · waiting to load`);
-                else toast.error(result.error);
-              }}
-            >
-              <RotateCcw /> Restore
-            </Button>
-          }
         />
       )}
       {sale.status === "Ordered" && (
@@ -247,16 +363,6 @@ export function SaleDetail({ id }: { id: string }) {
           icon={<PackageOpen className={sale.late ? "text-amber-700" : "text-sky-700"} />}
           title={sale.late ? "Late delivery · waiting to load again" : "Bill created · waiting to load"}
           text="Load the items on the lorry. Stock is reduced when you mark it loaded."
-          action={
-            <div className="flex flex-wrap gap-2">
-              <Button variant="outline" onClick={() => dialog.open("deliver")}>
-                Deliver directly
-              </Button>
-              <Button onClick={() => dialog.open("load")}>
-                <Truck /> Load on lorry
-              </Button>
-            </div>
-          }
         />
       )}
       {sale.status === "Loaded" && (
@@ -265,16 +371,6 @@ export function SaleDetail({ id }: { id: string }) {
           icon={<Truck className="text-sky-700" />}
           title={`On lorry ${sale.vehicleNumber || ""} since ${formatDate(sale.loadedDate)}`}
           text="When you give the items to the store, mark it delivered and record the money collected."
-          action={
-            <div className="flex flex-wrap gap-2">
-              <Button variant="outline" onClick={() => dialog.open("unload")}>
-                Unload
-              </Button>
-              <Button onClick={() => dialog.open("deliver")}>
-                <Truck /> Deliver & collect cash
-              </Button>
-            </div>
-          }
         />
       )}
       {d.delivered && d.due > 0 && (
@@ -289,60 +385,68 @@ export function SaleDetail({ id }: { id: string }) {
                 ? "Due today."
                 : `${daysLeft} day${daysLeft === 1 ? "" : "s"} left.`
           }
-          action={
-            <Button onClick={() => dialog.open("payment")}>
-              <HandCoins /> Record payment
-            </Button>
-          }
         />
       )}
 
       <Card>
-        <dl className="grid grid-cols-2 gap-x-6 gap-y-5 p-5 lg:grid-cols-4">
-          <Detail label="Raigam Invoice No.">
-            <span className="flex flex-wrap items-center gap-2">
-              {sale.invoiceNo || <span className="text-slate-400">Not entered</span>}
+        {/* Large: who the bill is for, Raigam's invoice number and what it comes to */}
+        <dl className="grid grid-cols-2 gap-x-6 gap-y-4 px-5 py-4 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_auto]">
+          <div className="col-span-2 min-w-0 lg:col-span-1">
+            <dt className="text-[11px] font-medium tracking-wide text-slate-500 uppercase">Dealer (Store)</dt>
+            <dd className="mt-0.5 text-lg leading-snug font-semibold">
+              {shop ? (
+                <Link href={`/stores/${shop.id}`} className="text-brand-700 hover:underline print:text-slate-900 print:no-underline">
+                  {shop.shopName}
+                </Link>
+              ) : (
+                <span className="text-slate-500">Deleted store</span>
+              )}
+            </dd>
+            {shop && <dd className="text-xs text-slate-500">{[shop.shopCode, shop.ownerName, shop.phone].filter(Boolean).join(" · ")}</dd>}
+          </div>
+          <div className="min-w-0">
+            <dt className="text-[11px] font-medium tracking-wide text-slate-500 uppercase">Raigam Invoice No.</dt>
+            <dd className="mt-0.5 flex flex-wrap items-center gap-2 text-lg leading-snug font-semibold text-slate-900 tabular-nums">
+              {sale.invoiceNo || <span className="text-base font-medium text-slate-400">Not entered</span>}
               {sale.invoiceNo && <CheckedToggle sale={sale} />}
-            </span>
-            <span className="block text-xs font-normal text-slate-500">Bill No. {sale.saleNo}</span>
-          </Detail>
-          <Detail label="Dealer (Store)">
-            {shop ? (
-              <Link href={`/stores/${shop.id}`} className="text-brand-700 hover:underline print:text-slate-900 print:no-underline">
-                {shop.shopName} ({shop.shopCode})
-              </Link>
-            ) : (
-              "Deleted store"
-            )}
-            {(shop?.ownerName || shop?.phone) && (
-              <span className="block text-xs font-normal text-slate-500">{[shop?.ownerName, shop?.phone].filter(Boolean).join(" · ")}</span>
-            )}
-          </Detail>
-          <Detail label="Address">{[shop?.address, shop?.town].filter(Boolean).join(", ") || "—"}</Detail>
-          <Detail label="Route / Territory">
-            {route ? `${route.routeCode} · ${route.routeName}` : "—"}
-            {route?.area && <span className="block text-xs font-normal text-slate-500">{route.area}</span>}
-          </Detail>
-          <Detail label="Booking Date">{formatDate(sale.date)}</Detail>
-          <Detail label="Actual Date">
+            </dd>
+            <dd className="text-xs text-slate-500">Bill No. {sale.saleNo}</dd>
+          </div>
+          <div className="text-right">
+            <dt className="text-[11px] font-medium tracking-wide text-slate-500 uppercase">Invoice Value</dt>
+            <dd className="mt-0.5 text-xl leading-snug font-bold text-slate-900 tabular-nums">{formatMoney(d.total)}</dd>
+            <dd className={cn("text-xs font-medium tabular-nums", d.due > 0 ? "text-red-600" : d.delivered ? "text-emerald-700" : "text-slate-500")}>
+              {d.delivered ? `Cash balance ${formatMoney(d.due)}` : "Cash balance after delivery"}
+            </dd>
+          </div>
+        </dl>
+        {/* The rest, small */}
+        <dl className="grid grid-cols-2 gap-x-6 gap-y-2.5 border-t border-slate-100 bg-slate-50/60 px-5 py-3 sm:grid-cols-4 lg:grid-cols-7">
+          <SmallDetail label="Address">{[shop?.address, shop?.town].filter(Boolean).join(", ") || "—"}</SmallDetail>
+          <SmallDetail label="Route / Territory">
+            {/* The route's towns on hover, to keep the strip short */}
+            <span title={route?.area || undefined}>{route ? `${route.routeCode} · ${route.routeName}` : "—"}</span>
+          </SmallDetail>
+          <SmallDetail label="Booking Date">{formatDate(sale.date)}</SmallDetail>
+          <SmallDetail label="Actual Date">
             {d.delivered ? formatDate(sale.deliveredDate) : <span className="text-slate-500">Not delivered yet</span>}
             {sale.loadedDate && (
-              <span className="block text-xs font-normal text-slate-500">
+              <span className="block text-[11px] font-normal text-slate-500">
                 Loaded {formatDate(sale.loadedDate)}
                 {sale.vehicleNumber ? ` · ${sale.vehicleNumber}` : ""}
               </span>
             )}
-          </Detail>
-          <Detail label="Rep">{sale.repName || "—"}</Detail>
-          <Detail label="Mode of Payment">
+          </SmallDetail>
+          <SmallDetail label="Rep">{sale.repName || "—"}</SmallDetail>
+          <SmallDetail label="Mode of Payment">
             {paymentMode || <span className="text-slate-500">Not paid yet</span>}
             {(billPayments.length > 0 || onCredit > 0) && (
-              <span className="block text-xs font-normal text-slate-500">
+              <span className="block text-[11px] font-normal text-slate-500">
                 {[billPayments.length ? `${formatMoney(d.paid)} paid` : "", onCredit ? `${formatMoney(onCredit)} on credit` : ""].filter(Boolean).join(" · ")}
               </span>
             )}
-          </Detail>
-          <Detail label="End Date to Collect">
+          </SmallDetail>
+          <SmallDetail label="End Date to Collect">
             {d.delivered ? (
               <DueDateLabel dueDate={sale.dueDate} due={d.due} overdueDays={d.overdueDays} />
             ) : sale.status === "Cancelled" ? (
@@ -350,24 +454,16 @@ export function SaleDetail({ id }: { id: string }) {
             ) : (
               <span className="text-slate-500">{shop?.creditDays ?? 21} days after delivery</span>
             )}
-          </Detail>
-          <Detail label="Invoice Value">
-            <span className="text-base tabular-nums">{formatMoney(d.total)}</span>
-          </Detail>
-          <Detail label="Cash Balance">
-            <span className={cn("text-base tabular-nums", d.due > 0 ? "text-red-600" : d.delivered ? "text-emerald-700" : "text-slate-500")}>
-              {d.delivered ? formatMoney(d.due) : "After delivery"}
-            </span>
-          </Detail>
+          </SmallDetail>
           {sale.notes && (
-            <div className="col-span-2 lg:col-span-4">
-              <Detail label="Note">{sale.notes}</Detail>
-            </div>
+            <SmallDetail label="Note" className="col-span-full">
+              {sale.notes}
+            </SmallDetail>
           )}
           {sale.deliveryNote && (
-            <div className="col-span-2 lg:col-span-4">
-              <Detail label="Delivery Note">{sale.deliveryNote}</Detail>
-            </div>
+            <SmallDetail label="Delivery Note" className="col-span-full">
+              {sale.deliveryNote}
+            </SmallDetail>
           )}
         </dl>
       </Card>
@@ -390,16 +486,6 @@ export function SaleDetail({ id }: { id: string }) {
               </span>
             )}
           </h2>
-          {canEditItems && (
-            <div className="flex flex-wrap gap-2 print:hidden">
-              <Button variant="secondary" size="sm" onClick={() => editItem.open("item")}>
-                <Plus /> Add item
-              </Button>
-              <Button variant="secondary" size="sm" onClick={() => editItem.open("free")}>
-                <Gift /> Add free issue item
-              </Button>
-            </div>
-          )}
         </div>
         {/* The bill in one line: items, less the return items (listed below the items), and what it comes to */}
         <dl className="flex flex-wrap items-baseline gap-x-8 gap-y-2 border-b border-slate-200 bg-slate-50/70 px-5 py-3 text-sm print:hidden">
@@ -594,14 +680,9 @@ export function SaleDetail({ id }: { id: string }) {
                 <span className="font-normal text-slate-500">
                   {sale.returns.length > 0
                     ? `· ${sale.status === "Delivered" ? "taken at delivery" : "to collect at delivery"}, credited on this bill, sent back to Raigam`
-                    : "· none. Good or market returns the store gives back are credited on this bill."}
+                    : "· none. Good or market returns the store gives back are credited on this bill (Add › Return item at the top)."}
                 </span>
               </h2>
-              {canEditItems && (
-                <Button variant="secondary" size="sm" className="print:hidden" onClick={() => editReturn.open("new")}>
-                  <Plus /> Add return
-                </Button>
-              )}
             </div>
             {sale.returns.length > 0 && (
               <Table>
@@ -755,7 +836,7 @@ export function SaleDetail({ id }: { id: string }) {
             title={`Payments · ${billPayments.length}`}
             description={
               left <= 0.004
-                ? "Fully paid"
+                ? "Fully paid. Paid part cash, part cheque? Lower a payment's amount with the pencil, then add the rest."
                 : d.delivered
                   ? `${formatMoney(d.paid)} paid · ${formatMoney(left)} on credit, to collect by ${formatDate(sale.dueDate)}`
                   : d.paid > 0
@@ -763,11 +844,9 @@ export function SaleDetail({ id }: { id: string }) {
                     : "Paid with the order or in advance? Add it here. The rest is collected after delivery."
             }
             actions={
-              left > 0.004 && (
-                <Button size="sm" onClick={() => dialog.open("payment")}>
-                  <Plus /> Add payment
-                </Button>
-              )
+              <Button size="sm" variant="secondary" onClick={() => dialog.open("payment")} disabled={!canPay} title={canPay ? undefined : "Nothing left to pay on this bill"}>
+                <Plus /> Add payment
+              </Button>
             }
           />
           <Table>

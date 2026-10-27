@@ -26,6 +26,7 @@ import {
   type OrderInput,
   type OrderItem,
   type OrderLineInput,
+  type OrderInvoice,
   type OrderPayment,
   type Payment,
   type PaymentInput,
@@ -110,6 +111,8 @@ export type Actions = {
   deleteOrder: (id: string) => Result;
   /** Record how a Raigam bill was paid; works on posted orders too */
   payOrder: (id: string, payment: OrderPayment) => Result;
+  /** Add or change Raigam's invoice / PO number; works on posted orders too */
+  setOrderInvoice: (id: string, invoice: OrderInvoice) => Result;
   /** Adds received quantities to stock. `locationByLine` maps OrderItem.id -> location number. */
   postOrderToStock: (id: string, locationByLine: Record<string, string>) => Result;
   reverseOrderPosting: (id: string) => Result;
@@ -210,6 +213,7 @@ export const ACTION_NAMES = [
   "updateOrder",
   "deleteOrder",
   "payOrder",
+  "setOrderInvoice",
   "postOrderToStock",
   "reverseOrderPosting",
   "receiveLoad",
@@ -376,6 +380,18 @@ function takeFromStock(stock: StockRecord[], lines: StockMove[], date: string): 
     next[idx] = { ...r, availableQty: r.availableQty - l.qty, issuedQty: r.issuedQty + l.qty, lastUpdate: date };
   }
   return { stock: next };
+}
+
+/** Take out goods that already left the store (a bill delivered without loading): never blocks, short stock just stops at 0 */
+function takeWhatIsThere(stock: StockRecord[], lines: StockMove[], date: string): StockRecord[] {
+  const next = [...stock];
+  for (const l of lines) {
+    const idx = next.findIndex((r) => r.sapCode === l.sapCode && r.locationNumber === l.locationNumber);
+    if (idx < 0) continue;
+    const r = next[idx];
+    next[idx] = { ...r, availableQty: Math.max(0, r.availableQty - l.qty), issuedQty: r.issuedQty + l.qty, lastUpdate: date };
+  }
+  return next;
 }
 
 // What a bill moves in and out of stock:
@@ -861,6 +877,16 @@ export const createCore =
       set((s) => ({ orders: s.orders.map((o) => (o.id === id ? { ...o, ...clean } : o)) }));
       return ok(id);
     },
+    setOrderInvoice: (id, invoice) => {
+      // The invoice comes after the order is sent, sometimes after the load is in stock, so posted orders are allowed
+      if (!get().orders.some((o) => o.id === id)) return fail("Order not found.");
+      const invoiceNumber = invoice.invoiceNumber.trim();
+      const poNumber = invoice.poNumber.trim();
+      const dup = duplicateInvoice(get().orders, invoiceNumber, id);
+      if (dup) return fail(`Invoice ${invoiceNumber} is already entered as ${dup.orderId}.`);
+      set((s) => ({ orders: s.orders.map((o) => (o.id === id ? { ...o, invoiceNumber, poNumber } : o)) }));
+      return ok(id);
+    },
     postOrderToStock: (id, locationByLine) => {
       const { orders, orderItems, locations } = get();
       const order = orders.find((o) => o.id === id);
@@ -1344,12 +1370,9 @@ export const createCore =
       if (!input.date) return fail("Enter the delivery date.");
       if (!input.dueDate || input.dueDate < input.date) return fail("The end date for collecting must be on or after the delivery date.");
       // Not loaded yet? Delivering straight from the store takes the stock now.
+      // The goods already reached the store, so stock that's short in the app doesn't stop it.
       let nextStock = stock;
-      if (sale.status === "Ordered") {
-        const taken = takeFromStock(stock, loadMoves(sale.lines), input.date);
-        if ("error" in taken) return fail(taken.error);
-        nextStock = taken.stock;
-      }
+      if (sale.status === "Ordered") nextStock = takeWhatIsThere(stock, loadMoves(sale.lines), input.date);
 
       // At the store: what it didn't take (cancelled) and goods it gave back (returns)
       const cancels = input.cancels ?? {};
@@ -1391,17 +1414,23 @@ export const createCore =
             }
           : x,
       );
-      // Money collected at the door is a receipt linked to the bills it pays (this one and/or older ones)
-      let receipt: Payment | null = null;
-      if (input.collection && input.collection.amount > 0) {
-        const paymentInput: PaymentInput = { ...input.collection, shopId: sale.shopId, date: input.date };
-        const err = validatePayment(paymentInput, shops, nextSales, payments);
-        if (err) return fail(err);
-        receipt = { ...cleanPayment(paymentInput), id: newId(), receiptNo: nextCode(payments.map((p) => p.receiptNo), "RC", 4) };
+      // Each payment collected at the door is a receipt linked to the bills it pays (this one and/or older ones).
+      // Checked one after the other, so together they can't pay a bill more than it owes.
+      const collections = Array.isArray(input.collections) ? input.collections : input.collection ? [input.collection] : [];
+      let withReceipts = payments;
+      let firstReceipt = "";
+      for (const [i, collection] of collections.entries()) {
+        if (!(collection?.amount > 0)) continue;
+        const paymentInput: PaymentInput = { ...collection, shopId: sale.shopId, date: input.date };
+        const err = validatePayment(paymentInput, shops, nextSales, withReceipts);
+        if (err) return fail(collections.length > 1 ? `Payment ${i + 1}: ${err}` : err);
+        const receipt: Payment = { ...cleanPayment(paymentInput), id: newId(), receiptNo: nextCode(withReceipts.map((p) => p.receiptNo), "RC", 4) };
+        withReceipts = [...withReceipts, receipt];
+        firstReceipt ||= receipt.id;
       }
       // Returns can make the bill smaller than what was paid in advance: the extra stays with the store as an advance
-      set({ stock: nextStock, sales: nextSales, payments: normalizeAllocations(shops, nextSales, receipt ? [...payments, receipt] : payments) });
-      return ok(receipt?.id ?? id);
+      set({ stock: nextStock, sales: nextSales, payments: normalizeAllocations(shops, nextSales, withReceipts) });
+      return ok(firstReceipt || id);
     },
     undoDelivery: (id) => {
       const { sales, stock, raigamReturns } = get();

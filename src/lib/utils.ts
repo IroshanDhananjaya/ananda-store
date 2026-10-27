@@ -121,6 +121,13 @@ export function monthStartISO() {
   return todayISO().slice(0, 8) + "01";
 }
 
+/** Last day of the current month, ISO */
+export function monthEndISO() {
+  const now = new Date();
+  const end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+  return `${end.getFullYear()}-${pad(end.getMonth() + 1)}-${pad(end.getDate())}`;
+}
+
 /** "2026-10-22" -> "Thu" */
 export function weekdayOf(iso: string) {
   const [y, m, d] = iso.split("-").map(Number);
@@ -141,6 +148,21 @@ export function orderStatus(order: Order): OrderStatus {
 }
 
 /** Value of a supplier invoice line: qty × price − discount (the received qty once the order has arrived) */
+/**
+ * SAP code -> unit price on the latest Raigam invoice / order (order IDs count up).
+ * New order lines start at this price, not the cost price: cost is net of the invoice discount,
+ * which the order takes off again.
+ */
+export function lastInvoicePrices(orderItems: OrderItem[]) {
+  const latest = new Map<string, { orderId: string; price: number }>();
+  for (const l of orderItems) {
+    if (!(l.unitPrice > 0)) continue;
+    const seen = latest.get(l.itemCode);
+    if (!seen || l.orderId > seen.orderId) latest.set(l.itemCode, { orderId: l.orderId, price: l.unitPrice });
+  }
+  return new Map([...latest].map(([code, v]) => [code, v.price]));
+}
+
 export function orderLineValue(line: Pick<OrderItem, "orderedQty" | "receivedQty" | "unitPrice" | "discount">, order: Pick<Order, "receivedDate"> | undefined) {
   const qty = order?.receivedDate ? line.receivedQty : line.orderedQty;
   return round2(qty * line.unitPrice - line.discount);

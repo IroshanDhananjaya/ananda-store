@@ -7,7 +7,7 @@ import { categoryRanks, itemPickOptions } from "./categories";
 import { ACTION_NAMES, emptyData, fail, type Actions, type Data } from "./core";
 import { computeBalances, computeSaleDues } from "./ledger";
 import type { Result } from "./types";
-import { todayISO } from "./utils";
+import { lastInvoicePrices, todayISO } from "./utils";
 
 // Browser copy of the database. Pages read from it; every change goes to the
 // server (runAction), which checks it, saves it in Supabase and sends back the
@@ -102,22 +102,10 @@ export function useOrderMap() {
   return useMemo(() => new Map(orders.map((o) => [o.orderId, o])), [orders]);
 }
 
-/**
- * SAP code -> unit price on the latest Raigam invoice / order (order IDs count up).
- * New order lines start at this price, not the cost price: cost is net of the invoice discount,
- * which the order takes off again.
- */
+/** SAP code -> unit price on the latest Raigam invoice / order (see lastInvoicePrices) */
 export function useLastInvoicePrices() {
   const orderItems = useAppStore((s) => s.orderItems);
-  return useMemo(() => {
-    const latest = new Map<string, { orderId: string; price: number }>();
-    for (const l of orderItems) {
-      if (!(l.unitPrice > 0)) continue;
-      const seen = latest.get(l.itemCode);
-      if (!seen || l.orderId > seen.orderId) latest.set(l.itemCode, { orderId: l.orderId, price: l.unitPrice });
-    }
-    return new Map([...latest].map(([code, v]) => [code, v.price]));
-  }, [orderItems]);
+  return useMemo(() => lastInvoicePrices(orderItems), [orderItems]);
 }
 
 /** Route id -> Route lookup */

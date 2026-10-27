@@ -8,14 +8,29 @@
 //   pnpm db:import-items <file> --yes   save them (saves a backup first)
 //   pnpm db:import-load <file>      check a JSON Raigam invoice (a received load) and show what it adds to stock
 //   pnpm db:import-load <file> --yes    save it, like Receive new load (saves a backup first)
+//   pnpm db:import-order <file>     check a JSON goods order sheet (the Order Qty filled in) and show the order it makes
+//   pnpm db:import-order <file> --yes   save it, like New purchase order (saves a backup first)
 
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { migrate as runMigrations } from "drizzle-orm/postgres-js/migrator";
 import { connect } from "../src/db/connect";
 import { applyAction, fetchData, replaceAll } from "../src/db/repo";
 import { DATA_KEYS, emptyData, seedData, type Data } from "../src/lib/core";
-import type { ItemInput, ReceiveLoadInput, StoreLocation } from "../src/lib/types";
-import { formatDate, formatMoney, formatQty, invoiceDiscount, netUnitCost, nextOrderId, nowTime, round2, todayISO } from "../src/lib/utils";
+import type { ItemInput, OrderInput, OrderLineInput, ReceiveLoadInput, StoreLocation } from "../src/lib/types";
+import {
+  formatDate,
+  formatMoney,
+  formatQty,
+  invoiceDiscount,
+  lastInvoicePrices,
+  netUnitCost,
+  nextOrderId,
+  NOT_PAID,
+  nowTime,
+  orderLineValue,
+  round2,
+  todayISO,
+} from "../src/lib/utils";
 
 try {
   process.loadEnvFile(".env.local");
@@ -348,6 +363,98 @@ async function importLoad() {
   console.log(`Saved ${loadsText}: stock and cost prices are updated.`);
 }
 
+/**
+ * An order file, typed up from a photo of the goods order sheet the user filled in. Each line is
+ * the sheet's SN (or a SAP code for an item with no SN) and its Order Qty. Prices are the last
+ * Raigam invoice prices, as on the New purchase order page.
+ */
+type OrderRow = {
+  orderDate: string;
+  requiredDate?: string;
+  territory?: string;
+  lines: { sn?: number; itemCode?: string; qty: number }[];
+};
+
+async function importOrder() {
+  const file = rest.find((a) => !a.startsWith("--"));
+  if (!file) throw new Error("Give the order file, e.g. pnpm db:import-order order.json");
+  const row = JSON.parse(readFileSync(file, "utf8")) as OrderRow;
+
+  const { items, orders, orderItems } = await fetchData(db);
+  const bySapCode = new Map(items.map((i) => [i.sapCode, i]));
+  const bySn = Map.groupBy(
+    items.filter((i) => i.sheetNo),
+    (i) => i.sheetNo,
+  );
+  const lastPrice = lastInvoicePrices(orderItems);
+  const problems: string[] = [];
+
+  const orderDate = toISODate(row?.orderDate);
+  if (!orderDate) problems.push(`orderDate "${row?.orderDate ?? ""}" isn't a date (use 2026-10-27 or 27/10/2026)`);
+  const requiredDate = row?.requiredDate ? toISODate(row.requiredDate) : "";
+  if (requiredDate === null) problems.push(`requiredDate "${row.requiredDate}" isn't a date`);
+  else if (requiredDate && orderDate && requiredDate < orderDate) problems.push("requiredDate is before orderDate");
+  const lineRows = Array.isArray(row?.lines) ? row.lines : [];
+  if (lineRows.length === 0) problems.push("no items");
+
+  const seen = new Set<string>();
+  const lines: OrderLineInput[] = [];
+  lineRows.forEach((l, n) => {
+    const code = String(l?.itemCode ?? "").trim().toUpperCase();
+    const at = `item ${n + 1}${l?.sn ? ` (SN ${l.sn})` : code ? ` (${code})` : ""}`;
+    const bySheet = l?.sn ? (bySn.get(l.sn) ?? []) : [];
+    if (l?.sn && bySheet.length !== 1) {
+      return problems.push(`${at}: ${bySheet.length ? `${bySheet.length} items have this SN` : "no item has this SN (set it with pnpm db:import-items)"}`);
+    }
+    const item = l?.sn ? bySheet[0] : bySapCode.get(code);
+    if (!item) return problems.push(`${at}: ${code ? "not in Items" : "give its sn or itemCode"}`);
+    if (seen.has(item.sapCode)) return problems.push(`${at}: ${item.sapCode} is listed more than once`);
+    seen.add(item.sapCode);
+    const qty = toNum(l.qty);
+    if (!Number.isInteger(qty) || qty <= 0) return problems.push(`${at}: qty must be a whole number above 0`);
+    lines.push({ itemCode: item.sapCode, orderedQty: qty, receivedQty: 0, unitPrice: lastPrice.get(item.sapCode) ?? 0, discount: 0, remarks: "" });
+  });
+
+  if (problems.length) throw new Error(`Nothing saved. Fix these in ${file}:\n  ${problems.join("\n  ")}`);
+
+  const total = round2(lines.reduce((sum, l) => sum + orderLineValue(l, undefined), 0));
+  const unpriced = lines.filter((l) => l.unitPrice === 0);
+  const territory = String(row.territory ?? "").trim();
+  console.log(`${nextOrderId(orders)}  order date ${formatDate(orderDate!)}${requiredDate ? `, required ${formatDate(requiredDate)}` : ""}${territory ? `, territory ${territory}` : ""}`);
+  for (const l of lines) {
+    const item = bySapCode.get(l.itemCode)!;
+    const price = l.unitPrice ? `@ ${formatMoney(l.unitPrice)} = ${formatMoney(orderLineValue(l, undefined))}` : "no price yet";
+    console.log(`  ${String(item.sheetNo || "").padStart(3)} ${formatQty(l.orderedQty).padStart(6)} × ${l.itemCode}  ${item.description}  ${price}`);
+  }
+  console.log(
+    `  ${lines.length} items, ${formatQty(lines.reduce((q, l) => q + l.orderedQty, 0))} units, order value ${formatMoney(total)}` +
+      `${unpriced.length ? ` (${unpriced.length} with no price yet, not counted)` : ""}\n`,
+  );
+  if (!rest.includes("--yes")) {
+    console.log("Nothing saved yet. Add --yes to save the order.");
+    return;
+  }
+
+  await backup();
+  // Same rules as New purchase order
+  const input: OrderInput = {
+    invoiceNumber: "",
+    poNumber: "",
+    orderDate: orderDate!,
+    receivedDate: "",
+    receivedTime: "",
+    ...NOT_PAID,
+    totalBillAmount: total,
+    discountPercent: 0,
+    territory,
+    requiredDate: requiredDate ?? "",
+  };
+  const { result } = await applyAction(db, "createOrder", [input, lines], todayISO());
+  if (!result.ok) throw new Error(result.error);
+  const saved = await fetchData(db);
+  console.log(`Saved ${saved.orders.find((o) => o.id === result.id)?.orderId ?? "the order"}.`);
+}
+
 const commands: Record<string, () => Promise<void>> = {
   migrate,
   seed,
@@ -356,6 +463,7 @@ const commands: Record<string, () => Promise<void>> = {
   clear,
   "import-items": importItems,
   "import-load": importLoad,
+  "import-order": importOrder,
 };
 
 async function main() {

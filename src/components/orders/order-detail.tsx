@@ -1,6 +1,6 @@
 "use client";
 
-import { Banknote, PackageCheck, PackagePlus, Pencil, Trash2, Truck, Undo2 } from "lucide-react";
+import { Banknote, FileText, PackageCheck, PackagePlus, Pencil, Trash2, Truck, Undo2 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, type ReactNode } from "react";
@@ -8,16 +8,29 @@ import { toast } from "sonner";
 import { LineStatusBadge, OrderStatusBadge } from "@/components/ui/badge";
 import { Button, buttonClass } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { BackLink, Card, CardHeader, Detail, PageHeader } from "@/components/ui/layout";
+import { BackLink, Card, CardHeader, Detail } from "@/components/ui/layout";
+import { StickyHeader } from "@/components/ui/sticky-header";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { useAppStore, useItemMap } from "@/lib/store";
 import { useDialog } from "@/lib/use-dialog";
 import { cn, formatDate, formatMoney, formatQty, invoiceDiscount, lineStatus, orderLineValue, orderStatus, round2 } from "@/lib/utils";
-import { PostToStockDialog, ReceiveOrderDialog } from "./order-dialogs";
-import { OrderPaymentSummary, PayOrderDialog } from "./order-payment";
+import { OrderInvoiceDialog, PostToStockDialog, ReceiveOrderDialog } from "./order-dialogs";
+import { OrderPaymentDetails, PayOrderDialog } from "./order-payment";
 import { OrderNotFound } from "./order-pages";
 
-type Dialog = "receive" | "post" | "reverse" | "delete" | "pay";
+type Dialog = "receive" | "post" | "reverse" | "delete" | "pay" | "invoice";
+
+/** One half of the invoice / payment row on the order card */
+function InfoBlock({ icon, title, children }: { icon: ReactNode; title: string; children: ReactNode }) {
+  return (
+    <div className="p-5">
+      <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-900 [&_svg]:size-4 [&_svg]:text-slate-400">
+        {icon} {title}
+      </h2>
+      <dl className="mt-4 grid grid-cols-2 gap-x-6 gap-y-5">{children}</dl>
+    </div>
+  );
+}
 
 function NextStep({ icon, title, text, action }: { icon: ReactNode; title: string; text: string; action: ReactNode }) {
   return (
@@ -59,31 +72,41 @@ export function OrderDetail({ id }: { id: string }) {
   return (
     <>
       <BackLink href="/orders">Purchase Orders</BackLink>
-      <PageHeader
+      {/* Invoice number and cheque are added after the order is made, so their buttons come first */}
+      <StickyHeader
         title={
           <span className="flex flex-wrap items-center gap-3">
             {order.orderId} <OrderStatusBadge status={status} />
           </span>
         }
-        description={order.invoiceNumber ? `Invoice ${order.invoiceNumber}` : "No invoice number yet"}
         actions={
           <>
+            <Button variant="outline" onClick={() => dialog.open("invoice")}>
+              <FileText /> {order.invoiceNumber ? "Edit invoice no." : "Add invoice no."}
+            </Button>
             {!payReminder && (
               <Button variant="outline" onClick={() => dialog.open("pay")}>
-                <Banknote /> {order.paymentMethod ? "Edit payment" : "Record payment"}
+                <Banknote /> {order.paymentMethod ? "Edit payment" : "Add cheque"}
               </Button>
             )}
+            {/* Icons only until the screen is wide enough for every label on one row */}
             {posted ? (
-              <Button variant="outline" onClick={() => dialog.open("reverse")}>
-                <Undo2 /> Reverse posting
+              <Button variant="outline" className="px-2.5 xl:px-4" onClick={() => dialog.open("reverse")} aria-label="Reverse posting" title="Reverse posting">
+                <Undo2 /> <span className="hidden xl:inline">Reverse posting</span>
               </Button>
             ) : (
               <>
-                <Link href={`/orders/${order.id}/edit`} className={buttonClass("outline")}>
-                  <Pencil /> Edit
+                <Link href={`/orders/${order.id}/edit`} className={buttonClass("outline", "md", "px-2.5 xl:px-4")} aria-label="Edit" title="Edit">
+                  <Pencil /> <span className="hidden xl:inline">Edit</span>
                 </Link>
-                <Button variant="outline" className="text-red-600 hover:bg-red-50" onClick={() => dialog.open("delete")}>
-                  <Trash2 /> Delete
+                <Button
+                  variant="outline"
+                  className="px-2.5 text-red-600 hover:bg-red-50 xl:px-4"
+                  onClick={() => dialog.open("delete")}
+                  aria-label="Delete"
+                  title="Delete"
+                >
+                  <Trash2 /> <span className="hidden xl:inline">Delete</span>
                 </Button>
               </>
             )}
@@ -128,10 +151,10 @@ export function OrderDetail({ id }: { id: string }) {
         <NextStep
           icon={<Banknote />}
           title="Not paid yet"
-          text={`Bill ${formatMoney(order.totalBillAmount)}. When you pay Raigam, record how it was paid (cash, cheque or bank transfer).`}
+          text={`Bill ${formatMoney(order.totalBillAmount)}. When you pay Raigam, add the cheque details (or cash / bank transfer).`}
           action={
             <Button onClick={() => dialog.open("pay")}>
-              <Banknote /> Record payment
+              <Banknote /> Add cheque
             </Button>
           }
         />
@@ -145,11 +168,6 @@ export function OrderDetail({ id }: { id: string }) {
             {order.territory && <Detail label="Territory">{order.territory}</Detail>}
             <Detail label="Order Received Date">{formatDate(order.receivedDate)}</Detail>
             <Detail label="Order Received Time">{order.receivedTime || "—"}</Detail>
-            <Detail label="Invoice Number">{order.invoiceNumber || "—"}</Detail>
-            <Detail label="PO Number">{order.poNumber || "—"}</Detail>
-            <Detail label="Payment">
-              <OrderPaymentSummary order={order} />
-            </Detail>
             <Detail label="Total Item Quantity">
               <span className="tabular-nums">{formatQty(totalOrdered)}</span>
               {order.receivedDate && (
@@ -172,6 +190,16 @@ export function OrderDetail({ id }: { id: string }) {
               <span className="text-base tabular-nums">{formatMoney(order.totalBillAmount)}</span>
             </Detail>
           </dl>
+          {/* Added after the order is made, with the buttons at the top */}
+          <div className="grid divide-y divide-slate-200 border-t border-slate-200 md:grid-cols-2 md:divide-x md:divide-y-0">
+            <InfoBlock icon={<FileText />} title="Raigam invoice">
+              <Detail label="Invoice Number">{order.invoiceNumber || <span className="text-amber-700">Not added yet</span>}</Detail>
+              <Detail label="PO Number">{order.poNumber || "—"}</Detail>
+            </InfoBlock>
+            <InfoBlock icon={<Banknote />} title="Payment to Raigam">
+              <OrderPaymentDetails order={order} />
+            </InfoBlock>
+          </div>
         </Card>
 
         <Card>
@@ -238,6 +266,7 @@ export function OrderDetail({ id }: { id: string }) {
 
       <ReceiveOrderDialog order={order} lines={lines} open={dialog.target === "receive"} onClose={dialog.close} />
       <PayOrderDialog order={order} open={dialog.target === "pay"} onClose={dialog.close} />
+      <OrderInvoiceDialog order={order} open={dialog.target === "invoice"} onClose={dialog.close} />
       <PostToStockDialog order={order} lines={lines} open={dialog.target === "post"} onClose={dialog.close} />
 
       <ConfirmDialog

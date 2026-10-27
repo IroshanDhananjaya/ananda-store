@@ -344,6 +344,8 @@ export type StockInput = Omit<StockRecord, "id">;
 export type OrderInput = Omit<Order, "id" | "orderId" | "postedToStock">;
 /** One payment per Raigam bill */
 export type OrderPayment = Pick<Order, "paymentMethod" | "paidDate" | "chequeNumber" | "chequeDepositDate" | "paymentReference">;
+/** Raigam's invoice for an order: not known when the order is made, entered once it comes */
+export type OrderInvoice = Pick<Order, "invoiceNumber" | "poNumber">;
 export type OrderLineInput = Pick<
   OrderItem,
   "itemCode" | "orderedQty" | "receivedQty" | "unitPrice" | "discount" | "remarks"
@@ -398,7 +400,10 @@ export type CollectionInput = Pick<Payment, "amount" | "method" | "chequeNumber"
 export type DeliveryInput = {
   date: string;
   dueDate: string;
-  collection: CollectionInput | null;
+  /** Each payment collected at the door, e.g. part cash, part cheque (one receipt each) */
+  collections?: CollectionInput[];
+  /** One payment, as older screens send it (a page left open across an update) */
+  collection?: CollectionInput | null;
   /** Bill line id -> qty the store didn't take */
   cancels?: Record<string, number>;
   /** The bill's return items as checked at the store; left out = keep the ones entered with the bill */

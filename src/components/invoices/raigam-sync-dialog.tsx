@@ -5,7 +5,8 @@ import { useMemo, useState, type ComponentProps, type FormEvent } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Field, Input } from "@/components/ui/form";
+import { DateRangePicker } from "@/components/ui/date-range-picker";
+import { Field } from "@/components/ui/form";
 import { FilterTabs } from "@/components/ui/layout";
 import { Modal } from "@/components/ui/modal";
 import { SearchSelect, type SearchOption } from "@/components/ui/search-select";
@@ -94,7 +95,7 @@ export function RaigamSyncDialog({ from, to, onClose }: { from: string; to: stri
 
   async function check(e: FormEvent) {
     e.preventDefault();
-    if (!range.from || !range.to || range.from > range.to) return void toast.error("Choose a From date on or before the To date.");
+    if (!range.from || !range.to) return void toast.error("Choose the dates to sync.");
     const back = (error: string) => {
       toast.error(error);
       setStep("dates");
@@ -206,14 +207,9 @@ export function RaigamSyncDialog({ from, to, onClose }: { from: string; to: stri
             New bills are added, and bills already here that changed on Raigam (and aren&apos;t delivered yet) are updated. You&apos;ll see
             everything before it&apos;s saved.
           </p>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Booked from" htmlFor="syncFrom">
-              <Input id="syncFrom" type="date" value={range.from} onChange={(e) => setRange((r) => ({ ...r, from: e.target.value }))} />
-            </Field>
-            <Field label="To" htmlFor="syncTo">
-              <Input id="syncTo" type="date" value={range.to} onChange={(e) => setRange((r) => ({ ...r, to: e.target.value }))} />
-            </Field>
-          </div>
+          <Field label="Booked between" htmlFor="syncDates">
+            <DateRangePicker id="syncDates" value={range} onChange={setRange} clearable={false} className="h-10" />
+          </Field>
         </form>
       )}
 

@@ -25,9 +25,17 @@ function packSize(item: Item) {
 /** UOM as the sheet prints it, pack size then unit: "50 Pkt" */
 function sheetUom(item: Item) {
   const unit = item.uom.charAt(0) + item.uom.slice(1).toLowerCase();
-  const pack = packSize(item);
+  // A card's package details count the packets on the card, not the cards in the case
+  const pack = item.uom === "CARD" ? null : packSize(item);
   return pack ? `${pack} ${unit}` : unit;
 }
+
+/**
+ * First SN of each block of Raigam's paper sheet; each block is laid out in its own two columns:
+ * page 3 (123–208), page 4 (209–285) and page 4's POSM items (286–299). SNs below 123 are pages 1–2.
+ */
+const SHEET_BLOCKS = [123, 209, 286];
+const blockOf = (s: Section) => SHEET_BLOCKS.findLast((first) => s.items[0].sheetNo >= first) ?? 0;
 
 /** Raigam's sections in sheet order (by their first SN), items by SN; items with no section last */
 function sheetSections(items: Item[]): Section[] {
@@ -41,9 +49,14 @@ function sheetSections(items: Item[]): Section[] {
 /**
  * Two columns like the paper sheet: sections stay whole, each goes to the side its middle falls on.
  * Only Raigam's numbered rows count where a section has them, so items added to a section
- * don't move it to the other column.
+ * don't move it to the other column. A block of one section (POSM items) is split down the middle.
  */
 function splitColumns(sections: Section[]): [Section[], Section[]] {
+  if (sections.length === 1) {
+    const [s] = sections;
+    const half = Math.ceil(s.items.length / 2);
+    return [[{ ...s, items: s.items.slice(0, half) }], half < s.items.length ? [{ ...s, items: s.items.slice(half) }] : []];
+  }
   const height = (s: Section) => (s.items.filter((i) => i.sheetNo).length || s.items.length) + 1.5;
   const half = sections.reduce((sum, s) => sum + height(s), 0) / 2;
   let left = 0;
@@ -144,9 +157,12 @@ export function OrderSheet({
   const onScreen = (i: Item) => includesText([i.description, i.sapCode, i.sheetNo || undefined], query);
   const inView = (i: Item) => show === "all" || qtyOf(i.sapCode) > 0;
   const viewSections = sections.map((s) => ({ ...s, items: s.items.filter(inView) })).filter((s) => s.items.length > 0);
-  // Sections with Raigam's SN numbers in two columns as on the paper, the rest in two more below
+  // Each block of sections with Raigam's SN numbers in two columns as on the paper, the rest in two more below
   const numbered = viewSections.filter((s) => s.items.some((i) => i.sheetNo));
-  const columns = [...splitColumns(numbered), ...splitColumns(viewSections.filter((s) => !numbered.includes(s)))];
+  const columns = [
+    ...[...Map.groupBy(numbered, blockOf).values()].flatMap(splitColumns),
+    ...splitColumns(viewSections.filter((s) => !numbered.includes(s))),
+  ];
   const noMatch = viewSections.every((s) => !s.items.some(onScreen));
 
   // Items picked elsewhere (Low stock): start on the first one down the sheet
@@ -302,7 +318,10 @@ export function OrderSheet({
 
         <div className="grid gap-4 p-3 sm:p-4 xl:grid-cols-2 print:grid-cols-2 print:gap-3 print:p-0 print:pt-3">
           {columns.map((col, c) =>
-            col.length === 0 ? null : (
+            col.length === 0 ? (
+              // An empty right column still takes its place, so the next block's two columns stay side by side
+              columns[c ^ 1].length > 0 && <div key={c} className="hidden xl:block print:block" />
+            ) : (
               <table key={c} className={cn("w-full border-collapse self-start text-[13px] print:text-[9px]", col.every((s) => !s.items.some(onScreen)) && "hidden print:table")}>
                 <thead>
                   <tr className="bg-slate-100 font-slab text-[11px] leading-tight font-bold text-slate-700 [print-color-adjust:exact] print:text-[8px] print:text-black">

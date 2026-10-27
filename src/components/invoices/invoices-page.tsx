@@ -9,7 +9,8 @@ import { LoadLorryDialog } from "@/components/sales/load-lorry-dialog";
 import { BillStatusBadge, DueDateLabel } from "@/components/ui/badge";
 import { Button, buttonClass } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { Input, Select } from "@/components/ui/form";
+import { DateRangePicker, type DateRange } from "@/components/ui/date-range-picker";
+import { Select } from "@/components/ui/form";
 import { Card, FilterTabs, PageHeader, SearchInput, SummaryTile, TableFooter, Toolbar } from "@/components/ui/layout";
 import { Pagination, usePagination } from "@/components/ui/pagination";
 import { EmptyRow, RowActions, Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
@@ -25,7 +26,9 @@ import { CashSheet } from "./cash-sheet";
 import { LoadingList } from "./loading-list";
 import { RaigamSyncDialog } from "./raigam-sync-dialog";
 
+/** Quick date tabs; "custom" is dates picked on the calendar that aren't one of them */
 type Preset = "today" | "yesterday" | "week" | "month" | "custom" | "all";
+const PRESETS = ["today", "yesterday", "week", "month"] as const;
 /** Which date puts an invoice on a day: when the bill was written, or when it was delivered */
 type DateBy = "bill" | "delivered";
 /** Bills day by day, or item totals across them (loading list) */
@@ -151,7 +154,7 @@ function InvoicesPage({
   const dues = useSaleDues();
 
   const [preset, setPreset] = useState<Preset>(allDates ? "all" : "today");
-  const [range, setRange] = useState(() => presetRange("today"));
+  const [range, setRange] = useState<DateRange>(() => presetRange("today"));
   const [routeId, setRouteId] = useState(initialRouteId);
   const [shopId, setShopId] = useState(initialShopId);
   const [dateBy, setDateBy] = useState<DateBy>("bill");
@@ -165,12 +168,18 @@ function InvoicesPage({
   const [checkingAll, setCheckingAll] = useState(false);
   const remove = useDialog<Sale>();
 
-  // A From date after the To date is read the other way round
-  const [from, to] = range.from <= range.to ? [range.from, range.to] : [range.to, range.from];
+  const { from, to } = range;
 
   function choosePreset(p: Preset) {
     setPreset(p);
     if (p !== "custom" && p !== "all") setRange(presetRange(p));
+  }
+
+  // Dates picked on the calendar light up their tab when they match one (Clear = all dates)
+  function chooseRange(r: DateRange) {
+    if (!r.from) return setPreset("all");
+    setRange(r);
+    setPreset(PRESETS.find((p) => presetRange(p).from === r.from && presetRange(p).to === r.to) ?? "custom");
   }
 
   function chooseRoute(id: string) {
@@ -314,33 +323,10 @@ function InvoicesPage({
                   { value: "yesterday", label: "Yesterday" },
                   { value: "week", label: "This week" },
                   { value: "month", label: "This month" },
-                  { value: "custom", label: "Custom" },
                   { value: "all", label: "All dates" },
                 ]}
               />
-              <div className="flex w-full items-center gap-2 sm:w-auto">
-                <Input
-                  type="date"
-                  value={range.from}
-                  onChange={(e) => {
-                    setPreset("custom");
-                    setRange((r) => ({ ...r, from: e.target.value || r.from }));
-                  }}
-                  className="h-9 min-w-0 flex-1 sm:w-40 sm:flex-none"
-                  aria-label="From date"
-                />
-                <span className="text-sm text-slate-500">to</span>
-                <Input
-                  type="date"
-                  value={range.to}
-                  onChange={(e) => {
-                    setPreset("custom");
-                    setRange((r) => ({ ...r, to: e.target.value || r.to }));
-                  }}
-                  className="h-9 min-w-0 flex-1 sm:w-40 sm:flex-none"
-                  aria-label="To date"
-                />
-              </div>
+              <DateRangePicker value={preset === "all" ? { from: "", to: "" } : range} onChange={chooseRange} />
               <Select
                 value={dateBy}
                 onChange={(e) => setDateBy(e.target.value as DateBy)}

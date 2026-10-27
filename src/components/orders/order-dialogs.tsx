@@ -9,8 +9,71 @@ import { Field, Input, Select, toNumber } from "@/components/ui/form";
 import { Modal } from "@/components/ui/modal";
 import { StackBox } from "@/components/ui/table";
 import { useAppStore, useItemMap } from "@/lib/store";
-import type { Order, OrderItem } from "@/lib/types";
-import { formatQty, nowTime, paymentOf, todayISO } from "@/lib/utils";
+import type { Order, OrderInvoice, OrderItem } from "@/lib/types";
+import { formatMoney, formatQty, nowTime, paymentOf, todayISO } from "@/lib/utils";
+
+// ---------- Raigam invoice: not known when the order is made, added once Raigam bills it ----------
+
+function InvoiceForm({ order, onDone }: { order: Order; onDone: () => void }) {
+  const setOrderInvoice = useAppStore((s) => s.setOrderInvoice);
+  const [invoice, setInvoice] = useState<OrderInvoice>({ invoiceNumber: order.invoiceNumber, poNumber: order.poNumber });
+  const set = (patch: Partial<OrderInvoice>) => setInvoice((v) => ({ ...v, ...patch }));
+
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    const result = await setOrderInvoice(order.id, invoice);
+    if (!result.ok) {
+      toast.error(result.error);
+      return;
+    }
+    const number = invoice.invoiceNumber.trim();
+    toast.success(number ? `Invoice ${number} saved on ${order.orderId}` : `Invoice number removed from ${order.orderId}`);
+    onDone();
+  }
+
+  return (
+    <form id="order-invoice-form" onSubmit={handleSubmit} noValidate className="grid gap-4 sm:grid-cols-2">
+      <Field label="Invoice Number" htmlFor="orderInvoiceNo" hint="As printed on Raigam's invoice">
+        <Input
+          id="orderInvoiceNo"
+          value={invoice.invoiceNumber}
+          onChange={(e) => set({ invoiceNumber: e.target.value })}
+          placeholder="e.g. 131087"
+          autoComplete="off"
+          autoFocus
+        />
+      </Field>
+      <Field label="PO Number" htmlFor="orderPoNo" hint="If the invoice shows one">
+        <Input id="orderPoNo" value={invoice.poNumber} onChange={(e) => set({ poNumber: e.target.value })} placeholder="e.g. 26101908" autoComplete="off" />
+      </Field>
+    </form>
+  );
+}
+
+/** Add or change Raigam's invoice number on an order (also once it's posted) */
+export function OrderInvoiceDialog({ order, open, onClose }: { order: Order; open: boolean; onClose: () => void }) {
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title={order.invoiceNumber ? `Edit invoice number for ${order.orderId}` : `Add invoice number to ${order.orderId}`}
+      description={`Order of ${formatMoney(order.totalBillAmount)}`}
+      footer={
+        <>
+          <Button variant="outline" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button type="submit" form="order-invoice-form">
+            Save invoice number
+          </Button>
+        </>
+      }
+    >
+      {/* Modal mounts this only while open, so it starts from the saved numbers each time */}
+      <InvoiceForm order={order} onDone={onClose} />
+    </Modal>
+  );
+}
 
 // ---------- Receive order: record delivery date/time and received quantities ----------
 

@@ -5,7 +5,8 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import { BillStatusBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input, Select } from "@/components/ui/form";
+import { DateRangePicker, type DateRange } from "@/components/ui/date-range-picker";
+import { Select } from "@/components/ui/form";
 import { Card, FilterTabs, PageHeader, SearchInput, SummaryTile, TableFooter, Toolbar } from "@/components/ui/layout";
 import { Pagination, usePagination } from "@/components/ui/pagination";
 import { EmptyRow, Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
@@ -17,7 +18,9 @@ import { addDays, cn, formatDate, formatMoney, formatQty, includesText, monthSta
 // Free issue given on bills (Raigam's scheme: not charged, Raigam pays it back) for a date range:
 // totals per item (what to claim) and each bill line with free issue (to check).
 
+/** Quick date tabs; "custom" is dates picked on the calendar that aren't one of them */
 type Preset = "today" | "yesterday" | "week" | "month" | "custom";
+const PRESETS = ["today", "yesterday", "week", "month"] as const;
 /** Which date puts a bill in the range: when it was written, or when it was delivered */
 type DateBy = "bill" | "delivered";
 type View = "items" | "bills";
@@ -49,18 +52,23 @@ export function FreeIssuesPage() {
   const shopMap = useShopMap();
   const dues = useSaleDues();
   const [preset, setPreset] = useState<Preset>("month");
-  const [range, setRange] = useState(() => presetRange("month"));
+  const [range, setRange] = useState<DateRange>(() => presetRange("month"));
   const [dateBy, setDateBy] = useState<DateBy>("bill");
   const [which, setWhich] = useState<Which>("all");
   const [view, setView] = useState<View>("items");
   const [query, setQuery] = useState("");
 
-  // A From date after the To date is read the other way round
-  const [from, to] = range.from <= range.to ? [range.from, range.to] : [range.to, range.from];
+  const { from, to } = range;
 
   function choosePreset(p: Preset) {
     setPreset(p);
     if (p !== "custom") setRange(presetRange(p));
+  }
+
+  // Dates picked on the calendar light up their tab when they match one
+  function chooseRange(r: DateRange) {
+    setRange(r);
+    setPreset(PRESETS.find((p) => presetRange(p).from === r.from && presetRange(p).to === r.to) ?? "custom");
   }
 
   // Every bill line with free issue in the range (cancelled bills don't count)
@@ -155,32 +163,9 @@ export function FreeIssuesPage() {
                 { value: "yesterday", label: "Yesterday" },
                 { value: "week", label: "This week" },
                 { value: "month", label: "This month" },
-                { value: "custom", label: "Custom" },
               ]}
             />
-            <div className="flex w-full items-center gap-2 sm:w-auto">
-              <Input
-                type="date"
-                value={range.from}
-                onChange={(e) => {
-                  setPreset("custom");
-                  setRange((r) => ({ ...r, from: e.target.value || r.from }));
-                }}
-                className="h-9 min-w-0 flex-1 sm:w-40 sm:flex-none"
-                aria-label="From date"
-              />
-              <span className="text-sm text-slate-500">to</span>
-              <Input
-                type="date"
-                value={range.to}
-                onChange={(e) => {
-                  setPreset("custom");
-                  setRange((r) => ({ ...r, to: e.target.value || r.to }));
-                }}
-                className="h-9 min-w-0 flex-1 sm:w-40 sm:flex-none"
-                aria-label="To date"
-              />
-            </div>
+            <DateRangePicker value={range} onChange={chooseRange} clearable={false} />
             <Select value={dateBy} onChange={(e) => setDateBy(e.target.value as DateBy)} className="h-9 sm:ml-auto sm:w-44" aria-label="Which date to use">
               <option value="bill">By bill date</option>
               <option value="delivered">By delivered date</option>

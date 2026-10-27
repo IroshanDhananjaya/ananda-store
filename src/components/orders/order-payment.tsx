@@ -4,10 +4,11 @@ import { useState, type FormEvent } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select } from "@/components/ui/form";
+import { Detail } from "@/components/ui/layout";
 import { Modal } from "@/components/ui/modal";
 import { useAppStore } from "@/lib/store";
 import { PAYMENT_METHODS, type Order, type OrderPayment, type PaymentMethod } from "@/lib/types";
-import { formatDate, formatMoney, paymentOf, todayISO } from "@/lib/utils";
+import { formatDate, formatMoney, NOT_PAID, paymentOf, todayISO } from "@/lib/utils";
 
 // How a Raigam bill was paid: one payment per load (Cash, Cheque or Bank Transfer), or not paid yet.
 
@@ -125,9 +126,34 @@ export function OrderPaymentSummary({ order }: { order: Order }) {
   );
 }
 
+/** The payment as Detail fields, laid out by the parent's grid */
+export function OrderPaymentDetails({ order }: { order: Order }) {
+  if (!order.paymentMethod)
+    return (
+      <Detail label="Paid By">
+        <span className="text-amber-700">Not paid yet</span>
+      </Detail>
+    );
+  const cheque = order.paymentMethod === "Cheque";
+  return (
+    <>
+      <Detail label="Paid By">
+        <span className="text-emerald-700">{order.paymentMethod}</span>
+      </Detail>
+      {cheque && <Detail label="Cheque Number">{order.chequeNumber}</Detail>}
+      {cheque && <Detail label="Cheque Deposit Date">{order.chequeDepositDate ? formatDate(order.chequeDepositDate) : "—"}</Detail>}
+      <Detail label={cheque ? "Cheque Given" : "Paid Date"}>{formatDate(order.paidDate)}</Detail>
+      {order.paymentReference && <Detail label="Reference">{order.paymentReference}</Detail>}
+    </>
+  );
+}
+
 function PayOrderForm({ order, onDone }: { order: Order; onDone: () => void }) {
   const payOrder = useAppStore((s) => s.payOrder);
-  const [payment, setPayment] = useState<OrderPayment>(() => paymentOf(order));
+  // Raigam is usually paid by cheque, so a new payment starts as one (the method can still be changed)
+  const [payment, setPayment] = useState<OrderPayment>(() =>
+    order.paymentMethod ? paymentOf(order) : { ...NOT_PAID, paymentMethod: "Cheque", paidDate: todayISO() },
+  );
   const [errors, setErrors] = useState<OrderPaymentErrors>({});
 
   async function handleSubmit(e: FormEvent) {
@@ -157,7 +183,7 @@ export function PayOrderDialog({ order, open, onClose }: { order: Order; open: b
     <Modal
       open={open}
       onClose={onClose}
-      title={order.paymentMethod ? `Edit payment for ${order.orderId}` : `Record payment for ${order.orderId}`}
+      title={order.paymentMethod ? `Edit payment for ${order.orderId}` : `Add cheque or payment for ${order.orderId}`}
       description={`Bill amount ${formatMoney(order.totalBillAmount)}${order.invoiceNumber ? ` · invoice ${order.invoiceNumber}` : ""}`}
       footer={
         <>

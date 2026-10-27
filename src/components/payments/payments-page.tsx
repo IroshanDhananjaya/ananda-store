@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { DateRangePicker, inDateRange, type DateRange } from "@/components/ui/date-range-picker";
 import { Select } from "@/components/ui/form";
 import { Card, FilterTabs, PageHeader, SearchInput, TableFooter, Toolbar } from "@/components/ui/layout";
 import { Pagination, usePagination } from "@/components/ui/pagination";
@@ -33,10 +34,12 @@ export function PaymentsPage() {
   const [query, setQuery] = useState("");
   const [routeId, setRouteId] = useState("");
   const [method, setMethod] = useState<Filter>("all");
+  const [range, setRange] = useState<DateRange>({ from: "", to: "" });
   const form = useDialog<Payment | "new">();
   const remove = useDialog<Payment>();
 
-  const rows = payments
+  const dated = payments.filter((p) => inDateRange(p.date, range));
+  const rows = dated
     .filter((p) => method === "all" || p.method === method)
     .filter((p) => !routeId || shopMap.get(p.shopId)?.routeId === routeId)
     .filter((p) => {
@@ -49,7 +52,7 @@ export function PaymentsPage() {
   const total = rows.filter(isPaid).reduce((sum, p) => sum + p.amount, 0);
   const pending = rows.filter((p) => !isPaid(p)).reduce((sum, p) => sum + p.amount, 0);
 
-  const pager = usePagination(rows, [query, routeId, method]);
+  const pager = usePagination(rows, [query, routeId, method, range]);
 
   return (
     <>
@@ -74,13 +77,14 @@ export function PaymentsPage() {
               </option>
             ))}
           </Select>
+          <DateRangePicker value={range} onChange={setRange} />
           <div className="sm:ml-auto">
             <FilterTabs<Filter>
               value={method}
               onChange={setMethod}
               options={[
-                { value: "all", label: "All", count: payments.length },
-                ...PAYMENT_METHODS.map((m) => ({ value: m, label: m, count: payments.filter((p) => p.method === m).length })),
+                { value: "all", label: "All", count: dated.length },
+                ...PAYMENT_METHODS.map((m) => ({ value: m, label: m, count: dated.filter((p) => p.method === m).length })),
               ]}
             />
           </div>

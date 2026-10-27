@@ -17,11 +17,11 @@ import { changesError, changesFrom, changesInput, DeliveryChanges, totalsWith, t
 //   Cancel        the store doesn't want it: kept as a Cancelled record, loaded goods go back to stock
 //   Restore       undo a cancel
 
-type Choice = "actual" | "late" | "cancel" | "restore";
+export type StatusChoice = "actual" | "late" | "cancel" | "restore";
 
-const LABELS: Record<Choice, string> = { actual: "Actual", late: "Late Delivery", cancel: "Cancel", restore: "Restore" };
+export const STATUS_LABELS: Record<StatusChoice, string> = { actual: "Actual", late: "Late Delivery", cancel: "Cancel", restore: "Restore" };
 
-function choicesFor(sale: Sale): Choice[] {
+function choicesFor(sale: Sale): StatusChoice[] {
   if (sale.status === "Cancelled") return ["restore"];
   if (sale.status === "Delivered") return [];
   return ["actual", "late", "cancel"];
@@ -44,7 +44,7 @@ function ActualForm({ sale, onDone }: { sale: Sale; onDone: () => void }) {
       date,
       // End date for collecting the balance: the store's credit days after delivery
       dueDate: addDays(date, creditDays),
-      collection: null,
+      collections: [],
     });
     if (!result.ok) {
       setError(result.error);
@@ -105,23 +105,23 @@ export function ActualDialog({ sale, open, onClose }: { sale: Sale; open: boolea
   );
 }
 
-export function BillStatusMenu({ sale, className }: { sale: Sale; className?: string }) {
+/** The status changes a bill can take now, and choosing one; render `dialogs` once (they confirm the choice) */
+export function useBillStatus(sale: Sale) {
   const markLate = useAppStore((s) => s.markLate);
   const cancelSale = useAppStore((s) => s.cancelSale);
   const restoreSale = useAppStore((s) => s.restoreSale);
-  const [confirm, setConfirm] = useState<Exclude<Choice, "restore"> | null>(null);
+  const [confirm, setConfirm] = useState<Exclude<StatusChoice, "restore"> | null>(null);
 
   const choices = choicesFor(sale);
-  if (choices.length === 0) return null;
   const loaded = sale.status === "Loaded";
 
-  async function run(choice: Exclude<Choice, "actual">) {
+  async function run(choice: Exclude<StatusChoice, "actual">) {
     const result = choice === "late" ? await markLate(sale.id) : choice === "cancel" ? await cancelSale(sale.id) : await restoreSale(sale.id);
     if (!result.ok) {
       toast.error(result.error);
       return;
     }
-    const done: Record<Exclude<Choice, "actual">, string> = {
+    const done: Record<Exclude<StatusChoice, "actual">, string> = {
       late: `${sale.saleNo} marked late${loaded ? " · goods back in the warehouse" : ""} · waiting to load`,
       cancel: `${sale.saleNo} cancelled${loaded ? " · goods back in stock" : ""}`,
       restore: `${sale.saleNo} restored · waiting to load`,
@@ -129,28 +129,13 @@ export function BillStatusMenu({ sale, className }: { sale: Sale; className?: st
     toast.success(done[choice]);
   }
 
-  return (
-    <>
-      <Select
-        value=""
-        onChange={(e) => {
-          const choice = e.target.value as Choice;
-          if (choice === "restore") void run(choice);
-          else setConfirm(choice);
-        }}
-        className={cn("h-8 w-36 text-xs", className)}
-        aria-label={`Change status of ${sale.saleNo}`}
-      >
-        <option value="" disabled hidden>
-          Change status
-        </option>
-        {choices.map((c) => (
-          <option key={c} value={c}>
-            {LABELS[c]}
-          </option>
-        ))}
-      </Select>
+  function choose(choice: StatusChoice) {
+    if (choice === "restore") void run(choice);
+    else setConfirm(choice);
+  }
 
+  const dialogs = (
+    <>
       <ActualDialog sale={sale} open={confirm === "actual"} onClose={() => setConfirm(null)} />
       <ConfirmDialog
         open={confirm === "late"}
@@ -181,6 +166,34 @@ export function BillStatusMenu({ sale, className }: { sale: Sale; className?: st
           setConfirm(null);
         }}
       />
+    </>
+  );
+
+  return { choices, choose, dialogs };
+}
+
+export function BillStatusMenu({ sale, className }: { sale: Sale; className?: string }) {
+  const { choices, choose, dialogs } = useBillStatus(sale);
+  if (choices.length === 0) return null;
+
+  return (
+    <>
+      <Select
+        value=""
+        onChange={(e) => choose(e.target.value as StatusChoice)}
+        className={cn("h-8 w-36 text-xs", className)}
+        aria-label={`Change status of ${sale.saleNo}`}
+      >
+        <option value="" disabled hidden>
+          Change status
+        </option>
+        {choices.map((c) => (
+          <option key={c} value={c}>
+            {STATUS_LABELS[c]}
+          </option>
+        ))}
+      </Select>
+      {dialogs}
     </>
   );
 }

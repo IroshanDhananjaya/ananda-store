@@ -8,7 +8,8 @@ import { ReturnKindBadge } from "@/components/sales/return-items";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { Card, DateRangeInputs, FilterTabs, inDateRange, PageHeader, SearchInput, SummaryTile, TableFooter, Toolbar, type DateRange } from "@/components/ui/layout";
+import { DateRangePicker, inDateRange, type DateRange } from "@/components/ui/date-range-picker";
+import { Card, FilterTabs, PageHeader, SearchInput, SummaryTile, TableFooter, Toolbar } from "@/components/ui/layout";
 import { Pagination, usePagination } from "@/components/ui/pagination";
 import { EmptyRow, RowActions, Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { formatUnits, heldValue, returnStock, type ReturnStockRow } from "@/lib/returns";
@@ -124,7 +125,7 @@ export function ReturnsPage() {
               ]}
             />
           )}
-          {tab !== "store" && <DateRangeInputs value={range} onChange={setRange} />}
+          {tab !== "store" && <DateRangePicker value={range} onChange={setRange} />}
         </Toolbar>
 
         {tab === "store" && (
