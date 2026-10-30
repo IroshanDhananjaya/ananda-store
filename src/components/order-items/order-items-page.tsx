@@ -16,7 +16,7 @@ import { EmptyRow, RowActions, Table, TBody, TD, TH, THead, TR } from "@/compone
 import { useAppStore, useItemMap, useOrderMap } from "@/lib/store";
 import type { LineStatus, OrderItem } from "@/lib/types";
 import { useDialog } from "@/lib/use-dialog";
-import { cn, formatMoney, formatQty, includesText, lineStatus, orderLineValue } from "@/lib/utils";
+import { cn, formatMoney, formatQty, includesText, invoiceNumbersOf, lineStatus, orderLineValue } from "@/lib/utils";
 
 type StatusFilter = "all" | LineStatus;
 type Values = { orderId: string; itemCode: string; orderedQty: string; receivedQty: string; unitPrice: string; discount: string; remarks: string };
@@ -25,6 +25,8 @@ const isWhole = (v: string) => v !== "" && Number.isInteger(Number(v)) && Number
 
 function OrderItemForm({ line, onDone }: { line: OrderItem | null; onDone: () => void }) {
   const orders = useAppStore((s) => s.orders);
+  const orderItems = useAppStore((s) => s.orderItems);
+  const orderInvoices = useAppStore((s) => s.orderInvoices);
   const items = useAppStore((s) => s.items);
   const addOrderItem = useAppStore((s) => s.addOrderItem);
   const updateOrderItem = useAppStore((s) => s.updateOrderItem);
@@ -42,17 +44,17 @@ function OrderItemForm({ line, onDone }: { line: OrderItem | null; onDone: () =>
   const [errors, setErrors] = useState<Partial<Record<keyof Values, string>>>({});
   const set = (key: keyof Values) => (e: { target: { value: string } }) => setValues((v) => ({ ...v, [key]: e.target.value }));
 
-  const openOrders = orders.filter((o) => !o.postedToStock).sort((a, b) => b.orderId.localeCompare(a.orderId));
+  // Orders with nothing in stock yet
+  const openOrders = orders
+    .filter((o) => !orderItems.some((l) => l.orderId === o.orderId && l.postedLocation))
+    .sort((a, b) => b.orderId.localeCompare(a.orderId));
   const selectedOrder = orderMap.get(values.orderId);
-  const status: LineStatus = !selectedOrder?.receivedDate
-    ? "Pending"
-    : toNumber(values.orderedQty) === toNumber(values.receivedQty)
-      ? "Match"
-      : "Unmatch";
+  const status = lineStatus({ orderedQty: toNumber(values.orderedQty), receivedQty: toNumber(values.receivedQty) }, selectedOrder);
+  // Once received, the value is what its Raigam invoice charges (the line keeps its invoice)
   const value = orderLineValue(
     {
       orderedQty: toNumber(values.orderedQty),
-      receivedQty: toNumber(values.receivedQty),
+      invoicedQty: line && line.orderId === values.orderId ? line.invoicedQty : 0,
       unitPrice: toNumber(values.unitPrice),
       discount: toNumber(values.discount),
     },
@@ -69,7 +71,9 @@ function OrderItemForm({ line, onDone }: { line: OrderItem | null; onDone: () =>
     const next: typeof errors = {};
     if (!values.orderId) next.orderId = "Select an order.";
     if (!values.itemCode) next.itemCode = "Select an item.";
-    if (!isWhole(values.orderedQty) || toNumber(values.orderedQty) === 0) next.orderedQty = "Whole number above 0.";
+    // 0 only for an item that came without being ordered
+    if (!isWhole(values.orderedQty) || (toNumber(values.orderedQty) === 0 && !(toNumber(values.receivedQty) > 0)))
+      next.orderedQty = "Whole number above 0.";
     if (!isWhole(values.receivedQty)) next.receivedQty = "Whole number, 0 or more.";
     if (values.unitPrice === "" || toNumber(values.unitPrice) < 0) next.unitPrice = "Enter a price of 0 or more.";
     if (toNumber(values.discount) < 0) next.discount = "0 or more.";
@@ -96,13 +100,13 @@ function OrderItemForm({ line, onDone }: { line: OrderItem | null; onDone: () =>
 
   return (
     <form id="order-item-form" onSubmit={handleSubmit} noValidate className="grid gap-4 sm:grid-cols-2">
-      <Field label="Order ID" htmlFor="oi-order" required error={errors.orderId} hint="Only orders not yet posted to stock.">
+      <Field label="Order ID" htmlFor="oi-order" required error={errors.orderId} hint="Only orders with nothing in stock yet.">
         <Select id="oi-order" value={values.orderId} onChange={set("orderId")} aria-invalid={!!errors.orderId} autoFocus>
           <option value="">Select an order…</option>
           {openOrders.map((o) => (
             <option key={o.id} value={o.orderId}>
               {o.orderId}
-              {o.invoiceNumber ? ` · ${o.invoiceNumber}` : ""}
+              {invoiceNumbersOf(o, orderInvoices) ? ` · ${invoiceNumbersOf(o, orderInvoices)}` : ""}
             </option>
           ))}
         </Select>
@@ -148,8 +152,10 @@ export function OrderItemsPage() {
   const orderItems = useAppStore((s) => s.orderItems);
   const deleteOrderItem = useAppStore((s) => s.deleteOrderItem);
   const orders = useAppStore((s) => s.orders);
+  const orderInvoices = useAppStore((s) => s.orderInvoices);
   const itemMap = useItemMap();
   const orderMap = useOrderMap();
+  const invoiceMap = new Map(orderInvoices.map((i) => [i.id, i]));
   const [query, setQuery] = useState("");
   const [orderFilter, setOrderFilter] = useState("");
   const [status, setStatus] = useState<StatusFilter>("all");
@@ -202,6 +208,8 @@ export function OrderItemsPage() {
                 { value: "all", label: "All", count: orderItems.length },
                 { value: "Match", label: "Match", count: count("Match") },
                 { value: "Unmatch", label: "Unmatch", count: count("Unmatch") },
+                { value: "Missing", label: "Missing", count: count("Missing") },
+                { value: "Extra", label: "Not ordered", count: count("Extra") },
                 { value: "Pending", label: "Pending", count: count("Pending") },
               ]}
             />
@@ -215,6 +223,7 @@ export function OrderItemsPage() {
               <TH>Item Name</TH>
               <TH className="text-right">Ordered Qty</TH>
               <TH className="text-right">Received Qty</TH>
+              <TH>Invoice</TH>
               <TH className="text-right">Price</TH>
               <TH className="text-right" title="Qty × price − discount">
                 Value
@@ -227,11 +236,12 @@ export function OrderItemsPage() {
             </tr>
           </THead>
           <TBody>
-            {rows.length === 0 && <EmptyRow colSpan={10}>No order items found.</EmptyRow>}
+            {rows.length === 0 && <EmptyRow colSpan={11}>No order items found.</EmptyRow>}
             {pager.pageRows.map(({ line, order, status: s }) => {
-              const locked = !!order?.postedToStock;
+              const locked = orderItems.some((l) => l.orderId === line.orderId && l.postedLocation);
+              const invoice = invoiceMap.get(line.invoiceId);
               return (
-                <TR key={line.id} className={cn(s === "Unmatch" && "bg-red-50/40")}>
+                <TR key={line.id} className={cn((s === "Unmatch" || s === "Missing") && "bg-red-50/40")}>
                   <TD>
                     {order ? (
                       <Link href={`/orders/${order.id}`} className="font-semibold text-brand-700 hover:underline">
@@ -247,6 +257,16 @@ export function OrderItemsPage() {
                   </TD>
                   <TD className="text-right tabular-nums">{formatQty(line.orderedQty)}</TD>
                   <TD className="text-right tabular-nums">{formatQty(line.receivedQty)}</TD>
+                  <TD>
+                    {invoice ? (
+                      <>
+                        <span className="block">{invoice.invoiceNumber || "No number yet"}</span>
+                        <span className="block text-xs text-slate-500">{formatQty(line.invoicedQty)} on invoice</span>
+                      </>
+                    ) : (
+                      <span className="text-slate-400">—</span>
+                    )}
+                  </TD>
                   <TD className="text-right tabular-nums">{formatMoney(line.unitPrice)}</TD>
                   <TD className="text-right tabular-nums">
                     <span className="block font-medium text-slate-900">{formatMoney(orderLineValue(line, order))}</span>

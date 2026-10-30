@@ -1,6 +1,6 @@
 import { linkAllPayments } from "./ledger";
 import { addDays } from "./utils";
-import type { Expense, Item, Order, OrderItem, Payment, Route, Sale, SaleStatus, Shop, StockRecord, StoreLocation } from "./types";
+import type { Expense, Item, Order, OrderInvoice, OrderItem, Payment, Route, Sale, SaleStatus, Shop, StockRecord, StoreLocation } from "./types";
 
 // Dummy data used on first load and by "Reset demo data".
 
@@ -72,13 +72,31 @@ const lines: Record<string, SeedLine[]> = {
 
 const costOf = (code: string) => seedItems.find((i) => i.sapCode === code)?.costPrice ?? 0;
 
-// Invoice price = the item's cost price, no discounts
+// One Raigam invoice for each order that has come
+const invoiceOf: Record<string, Pick<OrderInvoice, "invoiceNumber" | "poNumber" | "invoiceDate">> = {
+  "ORD - 0001": { invoiceNumber: "INV-RG-24561", poNumber: "PO-4500231", invoiceDate: "2026-10-04" },
+  "ORD - 0002": { invoiceNumber: "INV-RG-24610", poNumber: "PO-4500232", invoiceDate: "2026-10-09" },
+  "ORD - 0003": { invoiceNumber: "INV-RG-24702", poNumber: "PO-4500233", invoiceDate: "2026-10-15" },
+  "ORD - 0004": { invoiceNumber: "INV-RG-24788", poNumber: "PO-4500234", invoiceDate: "2026-10-20" },
+};
+
+export const seedOrderInvoices: OrderInvoice[] = Object.entries(invoiceOf).map(([orderId, invoice], o) => ({
+  id: `inv-${o + 1}`,
+  orderId,
+  ...invoice,
+  company: "Raigam Marketing Services (Pvt) Ltd",
+  discountPercent: 0,
+}));
+
+// Invoice price = the item's cost price, no discounts; what was received is what the invoice charges
 export const seedOrderItems: OrderItem[] = Object.entries(lines).flatMap(([orderId, rows], o) =>
   rows.map(([itemCode, orderedQty, receivedQty, remarks = "", postedLocation], i) => ({
     id: `oi-${o + 1}-${i + 1}`,
     orderId,
     itemCode,
     orderedQty,
+    invoiceId: seedOrderInvoices.find((inv) => inv.orderId === orderId)?.id ?? "",
+    invoicedQty: invoiceOf[orderId] ? receivedQty : 0,
     receivedQty,
     unitPrice: costOf(itemCode),
     discount: 0,
@@ -88,17 +106,18 @@ export const seedOrderItems: OrderItem[] = Object.entries(lines).flatMap(([order
 );
 
 function billFor(orderId: string) {
-  const total = lines[orderId].reduce((sum, [code, qty]) => sum + costOf(code) * qty, 0);
+  const received = !!invoiceOf[orderId];
+  const total = lines[orderId].reduce((sum, [code, ordered, got]) => sum + costOf(code) * (received ? got : ordered), 0);
   return Math.round(total * 100) / 100;
 }
 
 export const seedOrders: Order[] = [
-  { id: "ord-01", orderId: "ORD - 0001", invoiceNumber: "INV-RG-24561", poNumber: "PO-4500231", orderDate: "2026-10-02", receivedDate: "2026-10-04", receivedTime: "10:15", paymentMethod: "Cheque", paidDate: "2026-10-04", chequeNumber: "100231", chequeDepositDate: "2026-10-31", paymentReference: "", totalBillAmount: billFor("ORD - 0001"), discountPercent: 0, postedToStock: true, territory: "", requiredDate: "" },
-  { id: "ord-02", orderId: "ORD - 0002", invoiceNumber: "INV-RG-24610", poNumber: "PO-4500232", orderDate: "2026-10-07", receivedDate: "2026-10-09", receivedTime: "14:40", paymentMethod: "Cheque", paidDate: "2026-10-09", chequeNumber: "100245", chequeDepositDate: "2026-11-05", paymentReference: "", totalBillAmount: billFor("ORD - 0002"), discountPercent: 0, postedToStock: true, territory: "", requiredDate: "" },
-  { id: "ord-03", orderId: "ORD - 0003", invoiceNumber: "INV-RG-24702", poNumber: "PO-4500233", orderDate: "2026-10-12", receivedDate: "2026-10-15", receivedTime: "09:30", paymentMethod: "Cheque", paidDate: "2026-10-15", chequeNumber: "100259", chequeDepositDate: "2026-11-12", paymentReference: "", totalBillAmount: billFor("ORD - 0003"), discountPercent: 0, postedToStock: false, territory: "", requiredDate: "" },
-  { id: "ord-04", orderId: "ORD - 0004", invoiceNumber: "INV-RG-24788", poNumber: "PO-4500234", orderDate: "2026-10-17", receivedDate: "2026-10-20", receivedTime: "16:05", paymentMethod: "Cheque", paidDate: "2026-10-20", chequeNumber: "100266", chequeDepositDate: "2026-11-17", paymentReference: "", totalBillAmount: billFor("ORD - 0004"), discountPercent: 0, postedToStock: false, territory: "", requiredDate: "" },
-  { id: "ord-05", orderId: "ORD - 0005", invoiceNumber: "", poNumber: "PO-4500235", orderDate: "2026-10-20", receivedDate: "", receivedTime: "", paymentMethod: "", paidDate: "", chequeNumber: "", chequeDepositDate: "", paymentReference: "", totalBillAmount: billFor("ORD - 0005"), discountPercent: 0, postedToStock: false, territory: "", requiredDate: "" },
-  { id: "ord-06", orderId: "ORD - 0006", invoiceNumber: "", poNumber: "PO-4500236", orderDate: "2026-10-21", receivedDate: "", receivedTime: "", paymentMethod: "", paidDate: "", chequeNumber: "", chequeDepositDate: "", paymentReference: "", totalBillAmount: billFor("ORD - 0006"), discountPercent: 0, postedToStock: false, territory: "", requiredDate: "" },
+  { id: "ord-01", orderId: "ORD - 0001", orderDate: "2026-10-02", receivedDate: "2026-10-04", receivedTime: "10:15", paymentMethod: "Cheque", paidDate: "2026-10-04", chequeNumber: "100231", chequeDepositDate: "2026-10-31", paymentReference: "", totalBillAmount: billFor("ORD - 0001"), postedToStock: true, territory: "", requiredDate: "" },
+  { id: "ord-02", orderId: "ORD - 0002", orderDate: "2026-10-07", receivedDate: "2026-10-09", receivedTime: "14:40", paymentMethod: "Cheque", paidDate: "2026-10-09", chequeNumber: "100245", chequeDepositDate: "2026-11-05", paymentReference: "", totalBillAmount: billFor("ORD - 0002"), postedToStock: true, territory: "", requiredDate: "" },
+  { id: "ord-03", orderId: "ORD - 0003", orderDate: "2026-10-12", receivedDate: "2026-10-15", receivedTime: "09:30", paymentMethod: "Cheque", paidDate: "2026-10-15", chequeNumber: "100259", chequeDepositDate: "2026-11-12", paymentReference: "", totalBillAmount: billFor("ORD - 0003"), postedToStock: false, territory: "", requiredDate: "" },
+  { id: "ord-04", orderId: "ORD - 0004", orderDate: "2026-10-17", receivedDate: "2026-10-20", receivedTime: "16:05", paymentMethod: "Cheque", paidDate: "2026-10-20", chequeNumber: "100266", chequeDepositDate: "2026-11-17", paymentReference: "", totalBillAmount: billFor("ORD - 0004"), postedToStock: false, territory: "", requiredDate: "" },
+  { id: "ord-05", orderId: "ORD - 0005", orderDate: "2026-10-20", receivedDate: "", receivedTime: "", paymentMethod: "", paidDate: "", chequeNumber: "", chequeDepositDate: "", paymentReference: "", totalBillAmount: billFor("ORD - 0005"), postedToStock: false, territory: "", requiredDate: "" },
+  { id: "ord-06", orderId: "ORD - 0006", orderDate: "2026-10-21", receivedDate: "", receivedTime: "", paymentMethod: "", paidDate: "", chequeNumber: "", chequeDepositDate: "", paymentReference: "", totalBillAmount: billFor("ORD - 0006"), postedToStock: false, territory: "", requiredDate: "" },
 ];
 
 // ---------- Sales side ----------

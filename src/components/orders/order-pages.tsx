@@ -85,13 +85,14 @@ export function EditOrder({ id }: { id: string }) {
 
   if (!order) return <OrderNotFound />;
 
-  if (order.postedToStock) {
+  // Some items in stock: locked until the posting is reversed
+  if (lines.some((l) => l.postedLocation)) {
     return (
       <>
         <BackLink href={`/orders/${id}`}>{order.orderId}</BackLink>
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-6 py-10 text-center">
           <Lock className="mx-auto size-6 text-amber-600" />
-          <p className="mt-3 font-semibold text-amber-900">{order.orderId} is posted to stock</p>
+          <p className="mt-3 font-semibold text-amber-900">{order.orderId} {order.postedToStock ? "is posted to stock" : "is partly in stock"}</p>
           <p className="mt-1 text-sm text-amber-800">Reverse the stock posting from the order page before editing it.</p>
           <Link href={`/orders/${id}`} className={buttonClass("outline", "md", "mt-5")}>
             Go to order

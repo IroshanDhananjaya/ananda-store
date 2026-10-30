@@ -480,7 +480,7 @@ export function ReceiveLoadForm({ onSaved, cancelHref }: { onSaved: (id: string)
           <Card>
             <CardHeader title={<Step n={3}>Payment</Step>} description="Not paid yet? Leave it and record it later from the order page." />
             <div className="grid gap-4 p-5">
-              <OrderPaymentFields value={payment} onChange={setPayment} errors={paymentErrors} idPrefix="load" />
+              <OrderPaymentFields value={payment} onChange={setPayment} errors={paymentErrors} idPrefix="load" receivedDate={deliveryDate} />
             </div>
           </Card>
 

@@ -9,9 +9,24 @@ import { Card, CardHeader, PageHeader } from "@/components/ui/layout";
 import { EmptyRow, Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { isPaid } from "@/lib/ledger";
 import { profitFor } from "@/lib/profit";
+import { ChequeCountdown } from "@/components/orders/order-payment";
 import { LowStockCard } from "./low-stock-card";
 import { useAppStore, useItemMap, useOrderMap, useSaleDues, useShopBalances, useShopMap } from "@/lib/store";
-import { cn, formatDate, formatMoney, formatQty, LOW_STOCK_LEVEL, lineStatus, monthStartISO, orderStatus, todayISO } from "@/lib/utils";
+import {
+  CHEQUE_REMIND_DAYS,
+  cn,
+  daysUntil,
+  formatDate,
+  formatMoney,
+  formatQty,
+  LOW_STOCK_LEVEL,
+  lineStatus,
+  monthStartISO,
+  orderStatus,
+  RAIGAM_CHEQUE_DAYS,
+  raigamChequeDate,
+  todayISO,
+} from "@/lib/utils";
 
 function SectionLabel({ children }: { children: ReactNode }) {
   return <h2 className="mb-3 text-xs font-semibold tracking-wider text-slate-500 uppercase">{children}</h2>;
@@ -69,13 +84,19 @@ export function DashboardPage() {
   const orderMap = useOrderMap();
 
   const pending = orders.filter((o) => orderStatus(o) === "Pending");
-  const toPost = orders.filter((o) => orderStatus(o) === "Received");
+  // Received, or partly in stock: items still to add
+  const toPost = orders.filter((o) => ["Received", "Partial"].includes(orderStatus(o, orderItems)));
   const unmatched = orderItems.filter((l) => lineStatus(l, orderMap.get(l.orderId)) === "Unmatch");
   const lowStock = stock.filter((r) => r.availableQty <= LOW_STOCK_LEVEL).sort((a, b) => a.availableQty - b.availableQty);
   const stockUnits = stock.reduce((s, r) => s + r.availableQty, 0);
   const stockValue = stock.reduce((s, r) => s + r.availableQty * (itemMap.get(r.sapCode)?.wholesalePrice ?? 0), 0);
 
   const actionOrders = [...toPost, ...pending].sort((a, b) => a.orderDate.localeCompare(b.orderDate));
+  // Our cheques to Raigam still to be deposited (and late ones with nothing paid), soonest first
+  const cheques = orders
+    .map((o) => ({ order: o, date: raigamChequeDate(o) }))
+    .filter(({ order, date }) => date && (daysUntil(date) >= 0 || !order.paymentMethod))
+    .sort((a, b) => a.date.localeCompare(b.date));
   const qtyFor = (orderId: string) => orderItems.filter((l) => l.orderId === orderId).reduce((s, l) => s + l.orderedQty, 0);
 
   // Sales side
@@ -247,6 +268,47 @@ export function DashboardPage() {
       </div>
 
       <div className="mt-6 flex flex-col gap-6">
+        {cheques.length > 0 && (
+          <Card>
+            <CardHeader
+              title="Cheques to Raigam"
+              description={`Raigam deposits the cheque ${RAIGAM_CHEQUE_DAYS} days after the goods come. Amber from ${CHEQUE_REMIND_DAYS} days before: have the money in the bank.`}
+              actions={<CardLink href="/orders">All orders</CardLink>}
+            />
+            <Table>
+              <THead>
+                <tr>
+                  <TH>Order ID</TH>
+                  <TH>Received</TH>
+                  <TH>Cheque</TH>
+                  <TH className="text-right">Bill Amount</TH>
+                  <TH>Deposit Date</TH>
+                </tr>
+              </THead>
+              <TBody>
+                {cheques.map(({ order: o, date }) => (
+                  <TR key={o.id} className={cn(daysUntil(date) <= CHEQUE_REMIND_DAYS && "bg-amber-50/50")}>
+                    <TD className="font-semibold text-brand-700">
+                      <Link href={`/orders/${o.id}`} className="hover:underline">
+                        {o.orderId}
+                      </Link>
+                    </TD>
+                    <TD className="tabular-nums">{formatDate(o.receivedDate)}</TD>
+                    <TD>{o.paymentMethod ? o.chequeNumber : <span className="text-amber-700">Not entered yet</span>}</TD>
+                    <TD className="text-right font-semibold tabular-nums">{formatMoney(o.totalBillAmount)}</TD>
+                    <TD className="tabular-nums">
+                      {formatDate(date)}
+                      <span className="block text-xs">
+                        <ChequeCountdown order={o} />
+                      </span>
+                    </TD>
+                  </TR>
+                ))}
+              </TBody>
+            </Table>
+          </Card>
+        )}
+
         <Card>
           <CardHeader
             title="Orders needing action"
@@ -283,7 +345,7 @@ export function DashboardPage() {
                   <TD className="text-right tabular-nums">{formatQty(qtyFor(o.orderId))}</TD>
                   <TD className="text-right tabular-nums">{formatMoney(o.totalBillAmount)}</TD>
                   <TD>
-                    <OrderStatusBadge status={orderStatus(o)} />
+                    <OrderStatusBadge status={orderStatus(o, orderItems)} />
                   </TD>
                   <TD className="text-right">
                     <Link href={`/orders/${o.id}`} className={buttonClass("secondary", "sm")}>

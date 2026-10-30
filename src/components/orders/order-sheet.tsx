@@ -1,6 +1,6 @@
 "use client";
 
-import { Printer } from "lucide-react";
+import { ClipboardCheck, Printer } from "lucide-react";
 import Link from "next/link";
 import { Fragment, useEffect, useMemo, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
 import { toast } from "sonner";
@@ -8,27 +8,14 @@ import { Button, buttonClass } from "@/components/ui/button";
 import { FilterTabs, SearchInput } from "@/components/ui/layout";
 import { useAppStore, useLastInvoicePrices } from "@/lib/store";
 import type { Item, Order, OrderInput, OrderItem, OrderLineInput } from "@/lib/types";
-import { cn, formatDate, formatMoney, formatQty, includesText, invoiceDiscount, nextOrderId, NOT_PAID, orderLineValue, paymentOf, round2, todayISO } from "@/lib/utils";
+import { cn, formatDate, formatMoney, formatQty, includesText, nextOrderId, NOT_PAID, orderLineValue, paymentOf, round2, todayISO } from "@/lib/utils";
+import { ReceiveCheckSheet, sheetUom } from "./receive-check-sheet";
 
 /** Heading for items that aren't on Raigam's sheet (no section set on the item) */
 const OTHER = "OTHER ITEMS";
 
 type Section = { name: string; items: Item[] };
 type Show = "all" | "ordered";
-
-/** Pack size from the package details: "(90gx50)" → 50 */
-function packSize(item: Item) {
-  const match = /x\s*0*(\d+)\s*\)?\s*$/i.exec(item.packageDetails);
-  return match ? Number(match[1]) : null;
-}
-
-/** UOM as the sheet prints it, pack size then unit: "50 Pkt" */
-function sheetUom(item: Item) {
-  const unit = item.uom.charAt(0) + item.uom.slice(1).toLowerCase();
-  // A card's package details count the packets on the card, not the cards in the case
-  const pack = item.uom === "CARD" ? null : packSize(item);
-  return pack ? `${pack} ${unit}` : unit;
-}
 
 /**
  * First SN of each block of Raigam's paper sheet; each block is laid out in its own two columns:
@@ -114,6 +101,8 @@ export function OrderSheet({
   const [query, setQuery] = useState("");
   const [show, setShow] = useState<Show>("all");
   const [error, setError] = useState<string>();
+  // Printing the receiving check sheet instead of the order sheet, until the print dialog closes
+  const [printCheck, setPrintCheck] = useState(false);
 
   // Kept from the first render: the page passes a new list each time it draws
   const [marked] = useState(() => new Set(prefill));
@@ -148,8 +137,8 @@ export function OrderSheet({
       remarks: old?.remarks ?? "",
     };
   });
-  const discountPercent = order?.discountPercent ?? 0;
-  const total = invoiceDiscount(round2(orderLines.reduce((sum, l) => sum + orderLineValue(l, undefined), 0)), discountPercent).total;
+  // Raigam's discount % is on each invoice, known once the goods come
+  const total = round2(orderLines.reduce((sum, l) => sum + orderLineValue(l, undefined), 0));
   const unpriced = orderLines.filter((l) => l.unitPrice === 0).length;
   const units = orderLines.reduce((sum, l) => sum + l.orderedQty, 0);
 
@@ -171,6 +160,15 @@ export function OrderSheet({
     box?.scrollIntoView({ block: "center" });
     box?.focus({ preventScroll: true });
   }, []);
+
+  // Once the check sheet is drawn, print it; back to the order sheet when the print dialog closes
+  useEffect(() => {
+    if (!printCheck) return;
+    const done = () => setPrintCheck(false);
+    window.addEventListener("afterprint", done, { once: true });
+    window.print();
+    return () => window.removeEventListener("afterprint", done);
+  }, [printCheck]);
 
   function setItemQty(code: string, value: string) {
     // Whole numbers only; no leading zeros
@@ -204,14 +202,10 @@ export function OrderSheet({
     if (problem) return;
 
     const input: OrderInput = {
-      invoiceNumber: order?.invoiceNumber ?? "",
-      poNumber: order?.poNumber ?? "",
       orderDate,
       receivedDate: "",
       receivedTime: "",
       ...(order ? paymentOf(order) : NOT_PAID),
-      totalBillAmount: total,
-      discountPercent,
       territory,
       requiredDate,
     };
@@ -230,7 +224,12 @@ export function OrderSheet({
     <form onSubmit={handleSubmit} onKeyDown={onKeyDown} noValidate className="flex flex-col gap-4 print:block print:text-black">
       <style>{"@page { size: A4 portrait; margin: 8mm; }"}</style>
 
-      <div className="overflow-hidden rounded-xl border border-slate-300 bg-white shadow-sm print:overflow-visible print:rounded-none print:border-0 print:shadow-none">
+      <div
+        className={cn(
+          "overflow-hidden rounded-xl border border-slate-300 bg-white shadow-sm print:overflow-visible print:rounded-none print:border-0 print:shadow-none",
+          printCheck && "print:hidden",
+        )}
+      >
         {/* Sheet header, as on the paper: title, order value box, then the DB's details */}
         <div className="border-b-2 border-slate-800 px-4 pt-4 pb-5 sm:px-6 print:px-0 print:pt-0 print:pb-3">
           <div className="flex flex-wrap items-baseline justify-between gap-2 text-xs text-slate-600 print:text-[10px] print:text-black">
@@ -299,9 +298,15 @@ export function OrderSheet({
               { value: "ordered", label: "Ordered", count: ordered.length },
             ]}
           />
-          <Button variant="outline" size="sm" className="sm:ml-auto" onClick={() => window.print()} disabled={viewSections.length === 0}>
-            <Printer /> Print sheet
-          </Button>
+          <div className="flex gap-2 sm:ml-auto">
+            <Button variant="outline" size="sm" onClick={() => window.print()} disabled={viewSections.length === 0}>
+              <Printer /> Print sheet
+            </Button>
+            {/* The items ordered, to count the goods against when they come */}
+            <Button variant="outline" size="sm" onClick={() => setPrintCheck(true)} disabled={ordered.length === 0}>
+              <ClipboardCheck /> Print check sheet
+            </Button>
+          </div>
         </div>
 
         {marked.size > 0 && (
@@ -397,6 +402,8 @@ export function OrderSheet({
           )}
         </div>
       </div>
+
+      {printCheck && <ReceiveCheckSheet orderRef={orderRef} orderDate={orderDate} requiredDate={requiredDate} lines={orderLines} />}
 
       {/* Stays at the bottom of the screen while scrolling the sheet */}
       <div className="sticky bottom-0 z-20 -mx-4 border-t border-slate-200 bg-white/95 px-4 py-3 shadow-[0_-4px_12px_-6px_rgb(15_23_42/0.15)] backdrop-blur sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8 print:hidden">

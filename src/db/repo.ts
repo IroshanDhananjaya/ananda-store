@@ -39,11 +39,12 @@ function columns<T extends Table>(table: T) {
 // ---------- Loading ----------
 
 export async function loadData(tx: Tx): Promise<Data> {
-  const [items, locations, stock, orders, orderItems, routes, shops, sales, lines, payments, allocations, expenses, raigamReturns, raigamReturnLines, raigamLinks] = await Promise.all([
+  const [items, locations, stock, orders, orderInvoices, orderItems, routes, shops, sales, lines, payments, allocations, expenses, raigamReturns, raigamReturnLines, raigamLinks] = await Promise.all([
     tx.select(columns(t.items)).from(t.items).orderBy(asc(t.items.seq)),
     tx.select(columns(t.locations)).from(t.locations).orderBy(asc(t.locations.seq)),
     tx.select(columns(t.stock)).from(t.stock).orderBy(asc(t.stock.seq)),
     tx.select(columns(t.orders)).from(t.orders).orderBy(asc(t.orders.seq)),
+    tx.select(columns(t.orderInvoices)).from(t.orderInvoices).orderBy(asc(t.orderInvoices.seq)),
     tx.select(columns(t.orderItems)).from(t.orderItems).orderBy(asc(t.orderItems.seq)),
     tx.select(columns(t.routes)).from(t.routes).orderBy(asc(t.routes.seq)),
     tx.select(columns(t.shops)).from(t.shops).orderBy(asc(t.shops.seq)),
@@ -74,7 +75,11 @@ export async function loadData(tx: Tx): Promise<Data> {
       chequeDepositDate: unblank(r.chequeDepositDate),
       requiredDate: unblank(r.requiredDate),
     })),
-    orderItems: orderItems.map(({ postedLocation, ...r }): OrderItem => (postedLocation ? { ...r, postedLocation } : r)),
+    orderInvoices: orderInvoices.map((r) => ({ ...r, invoiceDate: unblank(r.invoiceDate) })),
+    orderItems: orderItems.map(({ postedLocation, invoiceId, ...r }): OrderItem => {
+      const line = { ...r, invoiceId: unblank(invoiceId) };
+      return postedLocation ? { ...line, postedLocation } : line;
+    }),
     routes: routes.map((r) => ({ ...r, visitDays: r.visitDays as WeekDay[] })),
     shops,
     sales: sales.map(
@@ -164,7 +169,8 @@ const SPECS: TableSpec[] = [
     chequeDepositDate: blank(r.chequeDepositDate),
     requiredDate: blank(r.requiredDate),
   })),
-  spec("orderItems", t.orderItems, (r) => ({ ...r, postedLocation: blank(r.postedLocation) })),
+  spec("orderInvoices", t.orderInvoices, (r) => ({ ...r, invoiceDate: blank(r.invoiceDate) })),
+  spec("orderItems", t.orderItems, (r) => ({ ...r, invoiceId: blank(r.invoiceId), postedLocation: blank(r.postedLocation) })),
   spec("routes", t.routes, (r) => ({ ...r })),
   spec("shops", t.shops, (r) => ({ ...r })),
   spec(

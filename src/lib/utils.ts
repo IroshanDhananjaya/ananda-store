@@ -1,6 +1,6 @@
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
-import type { LineStatus, Order, OrderItem, OrderPayment, OrderStatus } from "./types";
+import type { LineStatus, Order, OrderInvoice, OrderItem, OrderPayment, OrderStatus } from "./types";
 
 /** Stock at or below this quantity is flagged as low */
 export const LOW_STOCK_LEVEL = 10;
@@ -141,13 +141,40 @@ export function weekStartISO(iso: string) {
   return addDays(iso, -sinceMonday);
 }
 
-export function orderStatus(order: Order): OrderStatus {
+/** Raigam deposits our cheque for a delivery this many days after the goods come */
+export const RAIGAM_CHEQUE_DAYS = 21;
+/** The app reminds this many days before the deposit, so the money is in the bank */
+export const CHEQUE_REMIND_DAYS = 5;
+
+/**
+ * The day Raigam deposits our cheque for a received order: the date on the cheque, or 21 days
+ * after the goods came while no cheque is entered. "" = not received yet, or paid another way.
+ */
+export function raigamChequeDate(order: Pick<Order, "receivedDate" | "paymentMethod" | "chequeDepositDate">) {
+  if (!order.receivedDate || (order.paymentMethod && order.paymentMethod !== "Cheque")) return "";
+  return order.chequeDepositDate || addDays(order.receivedDate, RAIGAM_CHEQUE_DAYS);
+}
+
+/**
+ * Received orders to remind about: the cheque deposits within the next 5 days (or today), or
+ * the date has passed and no payment is entered yet. Soonest first.
+ */
+export function chequeReminders(orders: Order[]) {
+  return orders
+    .map((order) => ({ order, date: raigamChequeDate(order) }))
+    .filter(({ order, date }) => date && (daysUntil(date) < 0 ? !order.paymentMethod : daysUntil(date) <= CHEQUE_REMIND_DAYS))
+    .map((r) => ({ ...r, days: daysUntil(r.date) }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+}
+
+/** `orderItems` (any order's) tell a received order with some items already in stock apart ("Partial") */
+export function orderStatus(order: Order, orderItems: OrderItem[] = []): OrderStatus {
   if (order.postedToStock) return "Posted";
+  if (orderItems.some((l) => l.orderId === order.orderId && l.postedLocation)) return "Partial";
   if (order.receivedDate) return "Received";
   return "Pending";
 }
 
-/** Value of a supplier invoice line: qty × price − discount (the received qty once the order has arrived) */
 /**
  * SAP code -> unit price on the latest Raigam invoice / order (order IDs count up).
  * New order lines start at this price, not the cost price: cost is net of the invoice discount,
@@ -163,9 +190,38 @@ export function lastInvoicePrices(orderItems: OrderItem[]) {
   return new Map([...latest].map(([code, v]) => [code, v.price]));
 }
 
-export function orderLineValue(line: Pick<OrderItem, "orderedQty" | "receivedQty" | "unitPrice" | "discount">, order: Pick<Order, "receivedDate"> | undefined) {
-  const qty = order?.receivedDate ? line.receivedQty : line.orderedQty;
-  return round2(qty * line.unitPrice - line.discount);
+/**
+ * Value of an order line: qty × price − discount. Before the goods come it's the ordered qty; once
+ * received, the qty on its Raigam invoice (what Raigam charges for), 0 when it's on no invoice.
+ */
+export function orderLineValue(
+  line: Pick<OrderItem, "orderedQty" | "unitPrice" | "discount"> & { invoicedQty?: number },
+  order: Pick<Order, "receivedDate"> | undefined,
+) {
+  const qty = order?.receivedDate ? (line.invoicedQty ?? 0) : line.orderedQty;
+  return qty > 0 ? round2(qty * line.unitPrice - line.discount) : 0;
+}
+
+/** One Raigam invoice as printed: its items, lines total, the discount % off it and its grand total */
+export function invoiceTotals(invoice: Pick<OrderInvoice, "id" | "discountPercent">, orderItems: OrderItem[]) {
+  const lines = orderItems.filter((l) => l.invoiceId === invoice.id);
+  const linesTotal = round2(lines.reduce((sum, l) => sum + orderLineValue(l, { receivedDate: "received" }), 0));
+  return { lines, units: lines.reduce((n, l) => n + l.invoicedQty, 0), linesTotal, ...invoiceDiscount(linesTotal, invoice.discountPercent) };
+}
+
+/** What we owe Raigam for an order: its invoices' grand totals added up (before the goods come: the ordered items at their prices) */
+export function orderTotal(order: Pick<Order, "orderId" | "receivedDate">, invoices: OrderInvoice[], orderItems: OrderItem[]) {
+  const lines = orderItems.filter((l) => l.orderId === order.orderId);
+  if (!order.receivedDate) return round2(lines.reduce((sum, l) => sum + orderLineValue(l, order), 0));
+  return round2(invoices.filter((i) => i.orderId === order.orderId).reduce((sum, i) => sum + invoiceTotals(i, lines).total, 0));
+}
+
+/** An order's invoice numbers, e.g. "131632, 161342" ("" = none entered yet) */
+export function invoiceNumbersOf(order: Pick<Order, "orderId">, invoices: OrderInvoice[]) {
+  return invoices
+    .filter((i) => i.orderId === order.orderId && i.invoiceNumber)
+    .map((i) => i.invoiceNumber)
+    .join(", ");
 }
 
 /**
@@ -184,8 +240,10 @@ export function netUnitCost(line: { qty: number; unitPrice: number; discount: nu
 }
 
 /** Match / Unmatch is only meaningful after the delivery has been received */
-export function lineStatus(line: OrderItem, order: Order | undefined): LineStatus {
+export function lineStatus(line: Pick<OrderItem, "orderedQty" | "receivedQty">, order: Pick<Order, "receivedDate"> | undefined): LineStatus {
   if (!order?.receivedDate) return "Pending";
+  if (line.orderedQty === 0) return "Extra";
+  if (line.receivedQty === 0) return "Missing";
   return line.receivedQty === line.orderedQty ? "Match" : "Unmatch";
 }
 

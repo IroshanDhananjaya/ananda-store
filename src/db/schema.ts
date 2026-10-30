@@ -64,9 +64,6 @@ export const orders = pgTable("orders", {
   id: text().primaryKey(),
   seq: seq(),
   orderId: text().notNull().unique(),
-  invoiceNumber: text().notNull().default(""),
-  /** Raigam's purchase order number, from the invoice */
-  poNumber: text().notNull().default(""),
   orderDate: date({ mode: "string" }).notNull(),
   receivedDate: date({ mode: "string" }),
   receivedTime: text(),
@@ -77,13 +74,29 @@ export const orders = pgTable("orders", {
   chequeDepositDate: date({ mode: "string" }),
   paymentReference: text().notNull().default(""),
   totalBillAmount: money().notNull(),
-  /** Raigam's "Discount % for Total Invoice", taken off the lines total (0 = none) */
-  discountPercent: numeric({ precision: 5, scale: 2, mode: "number" }).notNull().default(0),
+  /** True once every received item is in stock */
   postedToStock: boolean().notNull().default(false),
   /** Raigam territory written on the goods order sheet */
   territory: text().notNull().default(""),
   /** Order sheet's "Required Date": when the goods are needed */
   requiredDate: date({ mode: "string" }),
+}, () => [noApiAccess()]).enableRLS();
+
+/** A Raigam invoice an order's goods came on: one order can come on several, each with its own discount */
+export const orderInvoices = pgTable("order_invoices", {
+  id: text().primaryKey(),
+  seq: seq(),
+  orderId: text()
+    .notNull()
+    .references(() => orders.orderId, { onDelete: "cascade" }),
+  invoiceNumber: text().notNull().default(""),
+  /** Raigam's purchase order number on the invoice */
+  poNumber: text().notNull().default(""),
+  /** The Raigam company that billed it, e.g. Raigam Wayamba Salterns PLC */
+  company: text().notNull().default(""),
+  invoiceDate: date({ mode: "string" }),
+  /** Raigam's "Discount % for Total Invoice", taken off this invoice's lines total (0 = none) */
+  discountPercent: numeric({ precision: 5, scale: 2, mode: "number" }).notNull().default(0),
 }, () => [noApiAccess()]).enableRLS();
 
 export const orderItems = pgTable(
@@ -98,6 +111,10 @@ export const orderItems = pgTable(
       .notNull()
       .references(() => items.sapCode),
     orderedQty: integer().notNull(),
+    /** The invoice it came on; NULL = on no invoice (not supplied) */
+    invoiceId: text().references(() => orderInvoices.id, { onDelete: "set null" }),
+    /** Qty on that invoice: what Raigam charges for */
+    invoicedQty: integer().notNull().default(0),
     receivedQty: integer().notNull(),
     /** Price per unit on the supplier invoice */
     unitPrice: money().notNull().default(0),

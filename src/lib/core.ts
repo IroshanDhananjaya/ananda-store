@@ -6,6 +6,7 @@ import {
   seedExpenses,
   seedItems,
   seedLocations,
+  seedOrderInvoices,
   seedOrderItems,
   seedOrders,
   seedPayments,
@@ -27,6 +28,7 @@ import {
   type OrderItem,
   type OrderLineInput,
   type OrderInvoice,
+  type OrderInvoiceInput,
   type OrderPayment,
   type Payment,
   type PaymentInput,
@@ -54,8 +56,9 @@ import {
   type LoadInput,
   type OrderItemInput,
   type ReceiveLoadInput,
+  type ReceiveOrderInput,
 } from "./types";
-import { invoiceDiscount, netUnitCost, newId, nextCode, nextOrderId, NOT_PAID, orderLineValue, round2 } from "./utils";
+import { netUnitCost, newId, nextCode, nextOrderId, NOT_PAID, orderTotal, round2 } from "./utils";
 
 // Business rules for every change to the data. Runs on the server (src/db/repo.ts)
 // against the rows loaded from the database inside a transaction; whatever the
@@ -67,6 +70,7 @@ export type Data = {
   locations: StoreLocation[];
   stock: StockRecord[];
   orders: Order[];
+  orderInvoices: OrderInvoice[];
   orderItems: OrderItem[];
   routes: Route[];
   shops: Shop[];
@@ -82,6 +86,7 @@ export const DATA_KEYS = [
   "locations",
   "stock",
   "orders",
+  "orderInvoices",
   "orderItems",
   "routes",
   "shops",
@@ -111,10 +116,16 @@ export type Actions = {
   deleteOrder: (id: string) => Result;
   /** Record how a Raigam bill was paid; works on posted orders too */
   payOrder: (id: string, payment: OrderPayment) => Result;
-  /** Add or change Raigam's invoice / PO number; works on posted orders too */
-  setOrderInvoice: (id: string, invoice: OrderInvoice) => Result;
-  /** Adds received quantities to stock. `locationByLine` maps OrderItem.id -> location number. */
-  postOrderToStock: (id: string, locationByLine: Record<string, string>) => Result;
+  /** Add a Raigam invoice to an order (`invoiceId` null) or change one's number, PO, company, date or discount %; works on posted orders too */
+  saveOrderInvoice: (id: string, invoiceId: string | null, input: OrderInvoiceInput) => Result;
+  /** The goods came: the received date, the Raigam invoices they came on and each item's count. Items already in stock can't change. */
+  receiveOrder: (id: string, input: ReceiveOrderInput) => Result;
+  /**
+   * Adds received quantities to stock, all at once or a few items at a time: `locationByLine` maps
+   * OrderItem.id -> location number for the items to add now. `priceByLine` maps OrderItem.id -> price
+   * on the invoice (lines left out keep theirs). The bill total follows.
+   */
+  postOrderToStock: (id: string, locationByLine: Record<string, string>, priceByLine?: Record<string, number>) => Result;
   reverseOrderPosting: (id: string) => Result;
   /** A load arrives from Raigam: saved as a received order, added to stock, item cost prices updated */
   receiveLoad: (input: ReceiveLoadInput) => Result;
@@ -213,7 +224,8 @@ export const ACTION_NAMES = [
   "updateOrder",
   "deleteOrder",
   "payOrder",
-  "setOrderInvoice",
+  "saveOrderInvoice",
+  "receiveOrder",
   "postOrderToStock",
   "reverseOrderPosting",
   "receiveLoad",
@@ -267,6 +279,7 @@ export const emptyData = (): Data => ({
   locations: [],
   stock: [],
   orders: [],
+  orderInvoices: [],
   orderItems: [],
   routes: [],
   shops: [],
@@ -282,6 +295,7 @@ export const seedData = (): Data => ({
   locations: seedLocations,
   stock: seedStock,
   orders: seedOrders,
+  orderInvoices: seedOrderInvoices,
   orderItems: seedOrderItems,
   routes: seedRoutes,
   shops: seedShops,
@@ -302,10 +316,13 @@ const isISODate = (s: unknown) => typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/
 
 function validateLine(line: OrderLineInput, items: Item[]): string | null {
   if (!items.some((i) => i.sapCode === line.itemCode)) return `Unknown item code "${line.itemCode}".`;
-  if (!isWholeNumber(line.orderedQty) || line.orderedQty === 0)
-    return `Ordered quantity for ${line.itemCode} must be a whole number above 0.`;
+  const invoicedQty = line.invoicedQty ?? 0;
   if (!isWholeNumber(line.receivedQty)) return `Received quantity for ${line.itemCode} must be a whole number.`;
-  return validatePrice(line.itemCode, Math.max(line.orderedQty, line.receivedQty), line.unitPrice, line.discount);
+  if (!isWholeNumber(invoicedQty)) return `Qty on the invoice for ${line.itemCode} must be a whole number.`;
+  // An item that wasn't ordered is only on the order because it came
+  if (!isWholeNumber(line.orderedQty) || (line.orderedQty === 0 && invoicedQty === 0 && line.receivedQty === 0))
+    return `Ordered quantity for ${line.itemCode} must be a whole number above 0.`;
+  return validatePrice(line.itemCode, Math.max(line.orderedQty, invoicedQty, line.receivedQty), line.unitPrice, line.discount);
 }
 
 /** Invoice price and line discount (Rs.): the discount can't be more than the line amount */
@@ -320,11 +337,35 @@ function validateDiscountPercent(percent: number): string | null {
   return Number.isFinite(percent) && percent >= 0 && percent < 100 ? null : "Invoice discount must be 0% or more and under 100%.";
 }
 
-/** Another order already has this supplier invoice number (entering a load twice would double the stock) */
-function duplicateInvoice(orders: Order[], invoiceNumber: string, exceptId?: string): Order | undefined {
+/** This supplier invoice number is already entered (entering a load twice would double the stock) */
+function duplicateInvoice(invoices: OrderInvoice[], invoiceNumber: string, exceptId?: string): OrderInvoice | undefined {
   const key = invoiceNumber.trim().toUpperCase();
-  return key ? orders.find((o) => o.id !== exceptId && o.invoiceNumber.trim().toUpperCase() === key) : undefined;
+  return key ? invoices.find((i) => i.id !== exceptId && i.invoiceNumber.trim().toUpperCase() === key) : undefined;
 }
+
+function validateInvoice(input: OrderInvoiceInput): string | null {
+  if (input.invoiceDate && !isISODate(input.invoiceDate)) return "Invoice date isn't a date.";
+  return validateDiscountPercent(input.discountPercent || 0);
+}
+
+function cleanInvoice(input: OrderInvoiceInput): OrderInvoiceInput {
+  return {
+    invoiceNumber: input.invoiceNumber.trim(),
+    poNumber: input.poNumber.trim(),
+    company: (input.company ?? "").trim(),
+    invoiceDate: input.invoiceDate ?? "",
+    discountPercent: round2(input.discountPercent || 0),
+  };
+}
+
+/** The order with its bill total worked out again from its invoices and lines */
+const totalled = (order: Order, invoices: OrderInvoice[], orderItems: OrderItem[]): Order => ({
+  ...order,
+  totalBillAmount: orderTotal(order, invoices, orderItems),
+});
+
+/** Some of the order's items are in stock: the order is locked until the posting is reversed */
+const anyPosted = (orderItems: OrderItem[], orderId: string) => orderItems.some((l) => l.orderId === orderId && !!l.postedLocation);
 
 function validateLines(lines: OrderLineInput[], items: Item[]): string | null {
   if (lines.length === 0) return "Add at least one item to the order.";
@@ -686,12 +727,9 @@ function cleanOrderPayment(p: OrderPayment): OrderPayment {
 
 function cleanOrder(input: OrderInput): OrderInput {
   return {
-    ...input,
+    orderDate: input.orderDate,
+    receivedDate: input.receivedDate,
     ...cleanOrderPayment(input),
-    invoiceNumber: input.invoiceNumber.trim(),
-    poNumber: input.poNumber.trim(),
-    totalBillAmount: round2(input.totalBillAmount),
-    discountPercent: round2(input.discountPercent || 0),
     // A received time without a received date is meaningless
     receivedTime: input.receivedDate ? input.receivedTime : "",
     territory: (input.territory ?? "").trim(),
@@ -824,46 +862,52 @@ export const createCore =
 
     // ---------- Orders ----------
     createOrder: (input, lines) => {
-      const err = validateLines(lines, get().items);
+      const { orders, items } = get();
+      const err = validateLines(lines, items);
       if (err) return fail(err);
       if (!input.orderDate) return fail("Order date is required.");
-      const pctErr = validateDiscountPercent(input.discountPercent || 0);
-      if (pctErr) return fail(pctErr);
       const payErr = validateOrderPayment(input);
       if (payErr) return fail(payErr);
-      const dup = duplicateInvoice(get().orders, input.invoiceNumber);
-      if (dup) return fail(`Invoice ${input.invoiceNumber.trim()} is already entered as ${dup.orderId}.`);
-      const order: Order ={ ...cleanOrder(input), id: newId(), orderId: nextOrderId(get().orders), postedToStock: false };
-      const newLines: OrderItem[] = lines.map((l) => ({ ...cleanLine(l), id: newId(), orderId: order.orderId }));
+      // A new order has no Raigam invoices yet: they're added when the goods come
+      const orderId = nextOrderId(orders);
+      const newLines: OrderItem[] = lines.map((l) => ({ ...cleanLine(l), invoiceId: "", invoicedQty: 0, id: newId(), orderId }));
+      const order = totalled({ ...cleanOrder(input), id: newId(), orderId, totalBillAmount: 0, postedToStock: false }, [], newLines);
       set((s) => ({ orders: [...s.orders, order], orderItems: [...s.orderItems, ...newLines] }));
       return ok(order.id);
     },
     updateOrder: (id, input, lines) => {
-      const order = get().orders.find((o) => o.id === id);
+      const { orders, orderInvoices, orderItems, items } = get();
+      const order = orders.find((o) => o.id === id);
       if (!order) return fail("Order not found.");
-      if (order.postedToStock) return fail("This order is posted to stock. Reverse the posting before editing.");
+      if (anyPosted(orderItems, order.orderId)) return fail("This order is posted to stock. Reverse the posting before editing.");
       if (!input.orderDate) return fail("Order date is required.");
-      const pctErr = validateDiscountPercent(input.discountPercent || 0);
-      if (pctErr) return fail(pctErr);
       const payErr = validateOrderPayment(input);
       if (payErr) return fail(payErr);
-      const dup = duplicateInvoice(get().orders, input.invoiceNumber, id);
-      if (dup) return fail(`Invoice ${input.invoiceNumber.trim()} is already entered as ${dup.orderId}.`);
-      const err = validateLines(lines, get().items);
+      // Each item stays on the invoice it came on unless the form says otherwise
+      const before = new Map(orderItems.filter((l) => l.orderId === order.orderId).map((l) => [l.itemCode, l]));
+      const invoiceIds = new Set(orderInvoices.filter((i) => i.orderId === order.orderId).map((i) => i.id));
+      const newLines: OrderItem[] = lines.map((l) => {
+        const was = before.get(l.itemCode);
+        const invoiceId = l.invoiceId ?? was?.invoiceId ?? "";
+        return { ...cleanLine(l), invoiceId, invoicedQty: invoiceId ? (l.invoicedQty ?? was?.invoicedQty ?? 0) : 0, id: newId(), orderId: order.orderId };
+      });
+      if (newLines.some((l) => l.invoiceId && !invoiceIds.has(l.invoiceId))) return fail("One of the items is on an invoice that isn't on this order.");
+      const err = validateLines(newLines, items);
       if (err) return fail(err);
-      const newLines: OrderItem[] = lines.map((l) => ({ ...cleanLine(l), id: newId(), orderId: order.orderId }));
-      set((s) => ({
-        orders: s.orders.map((o) => (o.id === id ? { ...o, ...cleanOrder(input) } : o)),
-        orderItems: [...s.orderItems.filter((l) => l.orderId !== order.orderId), ...newLines],
-      }));
+      const nextItems = [...orderItems.filter((l) => l.orderId !== order.orderId), ...newLines];
+      set({
+        orders: orders.map((o) => (o.id === id ? totalled({ ...o, ...cleanOrder(input) }, orderInvoices, nextItems) : o)),
+        orderItems: nextItems,
+      });
       return ok(id);
     },
     deleteOrder: (id) => {
       const order = get().orders.find((o) => o.id === id);
       if (!order) return fail("Order not found.");
-      if (order.postedToStock) return fail("This order is posted to stock. Reverse the posting before deleting.");
+      if (anyPosted(get().orderItems, order.orderId)) return fail("This order is posted to stock. Reverse the posting before deleting.");
       set((s) => ({
         orders: s.orders.filter((o) => o.id !== id),
+        orderInvoices: s.orderInvoices.filter((i) => i.orderId !== order.orderId),
         orderItems: s.orderItems.filter((l) => l.orderId !== order.orderId),
       }));
       return ok();
@@ -877,43 +921,167 @@ export const createCore =
       set((s) => ({ orders: s.orders.map((o) => (o.id === id ? { ...o, ...clean } : o)) }));
       return ok(id);
     },
-    setOrderInvoice: (id, invoice) => {
-      // The invoice comes after the order is sent, sometimes after the load is in stock, so posted orders are allowed
-      if (!get().orders.some((o) => o.id === id)) return fail("Order not found.");
-      const invoiceNumber = invoice.invoiceNumber.trim();
-      const poNumber = invoice.poNumber.trim();
-      const dup = duplicateInvoice(get().orders, invoiceNumber, id);
-      if (dup) return fail(`Invoice ${invoiceNumber} is already entered as ${dup.orderId}.`);
-      set((s) => ({ orders: s.orders.map((o) => (o.id === id ? { ...o, invoiceNumber, poNumber } : o)) }));
-      return ok(id);
-    },
-    postOrderToStock: (id, locationByLine) => {
-      const { orders, orderItems, locations } = get();
+    saveOrderInvoice: (id, invoiceId, input) => {
+      // The invoice number often comes after the load is in stock, so posted orders are allowed
+      const { orders, orderInvoices, orderItems } = get();
       const order = orders.find((o) => o.id === id);
       if (!order) return fail("Order not found.");
-      if (order.postedToStock) return fail("This order is already posted to stock.");
+      const current = invoiceId ? orderInvoices.find((i) => i.id === invoiceId && i.orderId === order.orderId) : undefined;
+      if (invoiceId && !current) return fail("That invoice isn't on this order any more. Reload the page.");
+      const err = validateInvoice(input);
+      if (err) return fail(err);
+      const clean = cleanInvoice(input);
+      const dup = duplicateInvoice(orderInvoices, clean.invoiceNumber, current?.id);
+      if (dup) return fail(`Invoice ${clean.invoiceNumber} is already entered on ${dup.orderId}.`);
+      const invoice: OrderInvoice = { ...clean, id: current?.id ?? newId(), orderId: order.orderId };
+      const nextInvoices = current ? orderInvoices.map((i) => (i.id === current.id ? invoice : i)) : [...orderInvoices, invoice];
+      // A new discount % changes what the order comes to
+      set({ orderInvoices: nextInvoices, orders: orders.map((o) => (o.id === id ? totalled(o, nextInvoices, orderItems) : o)) });
+      return ok(invoice.id);
+    },
+    receiveOrder: (id, input) => {
+      const { orders, orderInvoices, orderItems, items } = get();
+      const order = orders.find((o) => o.id === id);
+      if (!order) return fail("Order not found.");
+      if (order.postedToStock) return fail(`Everything received on ${order.orderId} is in stock. Reverse the posting to change it.`);
+      if (!isISODate(input.receivedDate)) return fail("Enter the received date.");
+      const current = orderItems.filter((l) => l.orderId === order.orderId);
+      const mine = orderInvoices.filter((i) => i.orderId === order.orderId);
+
+      // Invoices: one already on the order keeps its id, a new one gets its own
+      const idByKey = new Map<string, string>();
+      const invoices: OrderInvoice[] = [];
+      for (const [n, inv] of input.invoices.entries()) {
+        const where = `Invoice ${inv.invoiceNumber.trim() || n + 1}`;
+        const err = validateInvoice(inv);
+        if (err) return fail(`${where}: ${err}`);
+        if (!inv.key || idByKey.has(inv.key)) return fail("Two invoices are mixed up. Reload the page and try again.");
+        const clean = cleanInvoice(inv);
+        const existing = mine.find((i) => i.id === inv.key);
+        const twice = invoices.find((i) => clean.invoiceNumber && i.invoiceNumber.toUpperCase() === clean.invoiceNumber.toUpperCase());
+        if (twice) return fail(`Invoice ${clean.invoiceNumber} is entered twice.`);
+        const dup = duplicateInvoice(orderInvoices.filter((i) => i.orderId !== order.orderId), clean.invoiceNumber);
+        if (dup) return fail(`Invoice ${clean.invoiceNumber} is already entered on ${dup.orderId}.`);
+        const invoice: OrderInvoice = { ...clean, id: existing?.id ?? newId(), orderId: order.orderId };
+        idByKey.set(inv.key, invoice.id);
+        invoices.push(invoice);
+      }
+
+      // Every item: the invoice it came on (or none), the qty on it, what arrived and its price
+      const seen = new Set<string>();
+      const lines: OrderItem[] = [];
+      for (const l of input.lines) {
+        const was = l.id ? current.find((x) => x.id === l.id) : undefined;
+        if (l.id && !was) return fail("One of the items isn't on this order any more. Reload the page.");
+        const itemCode = was?.itemCode ?? l.itemCode;
+        if (!items.some((i) => i.sapCode === itemCode)) return fail(`Unknown item code "${itemCode}".`);
+        if (seen.has(itemCode)) return fail(`${itemCode} is on the order more than once.`);
+        seen.add(itemCode);
+        const invoiceId = l.invoiceKey ? idByKey.get(l.invoiceKey) : "";
+        if (invoiceId === undefined) return fail(`${itemCode} is on an invoice that isn't in the list.`);
+        const invoicedQty = invoiceId ? l.invoicedQty : 0;
+        if (!isWholeNumber(invoicedQty)) return fail(`Qty on the invoice for ${itemCode} must be a whole number.`);
+        if (invoiceId && invoicedQty === 0) return fail(`Enter the qty on the invoice for ${itemCode}, or mark it Missing.`);
+        if (!isWholeNumber(l.receivedQty)) return fail(`Received qty for ${itemCode} must be a whole number.`);
+        const orderedQty = was?.orderedQty ?? 0;
+        if (orderedQty === 0 && invoicedQty === 0 && l.receivedQty === 0) return fail(`${itemCode} wasn't ordered: enter what came, or take it off.`);
+        const priceErr = validatePrice(itemCode, Math.max(orderedQty, invoicedQty, l.receivedQty), l.unitPrice, l.discount);
+        if (priceErr) return fail(priceErr);
+        const line: OrderItem = {
+          ...(was ?? { id: newId(), orderId: order.orderId, orderedQty: 0 }),
+          itemCode,
+          invoiceId,
+          invoicedQty,
+          receivedQty: l.receivedQty,
+          unitPrice: round2(l.unitPrice),
+          discount: round2(l.discount),
+          remarks: l.remarks.trim(),
+        };
+        // Already in stock: only its remarks can change
+        const moved = was && (["invoiceId", "invoicedQty", "receivedQty", "unitPrice", "discount"] as const).some((k) => line[k] !== was[k]);
+        if (was?.postedLocation && moved) return fail(`${itemCode} is already in stock, so its invoice, counts and price can't change. Reverse the posting first.`);
+        lines.push(line);
+      }
+      const kept = new Set(lines.map((l) => l.id));
+      const dropped = current.filter((l) => !kept.has(l.id));
+      const stays = dropped.find((l) => l.orderedQty > 0 || l.postedLocation);
+      if (stays) return fail(`${stays.itemCode} is on the order${stays.postedLocation ? " and in stock" : ""}, so it can't be taken off here. Mark it Missing instead.`);
+      if (lines.length === 0) return fail("Add at least one item to the order.");
+
+      // Rows keep their place; new invoices and items go after
+      const lineById = new Map(lines.map((l) => [l.id, l]));
+      const invoiceById = new Map(invoices.map((i) => [i.id, i]));
+      const nextItems = [
+        ...orderItems.filter((l) => !dropped.includes(l)).map((l) => lineById.get(l.id) ?? l),
+        ...lines.filter((l) => !current.some((c) => c.id === l.id)),
+      ];
+      const nextInvoices = [
+        ...orderInvoices.filter((i) => i.orderId !== order.orderId || invoiceById.has(i.id)).map((i) => invoiceById.get(i.id) ?? i),
+        ...invoices.filter((i) => !mine.some((m) => m.id === i.id)),
+      ];
+      const received: Order = { ...order, receivedDate: input.receivedDate, receivedTime: input.receivedTime };
+      set({
+        orderInvoices: nextInvoices,
+        orderItems: nextItems,
+        orders: orders.map((o) => (o.id === id ? totalled(received, nextInvoices, nextItems) : o)),
+      });
+      return ok(id);
+    },
+    postOrderToStock: (id, locationByLine, priceByLine = {}) => {
+      const { orders, orderInvoices, orderItems, locations } = get();
+      const order = orders.find((o) => o.id === id);
+      if (!order) return fail("Order not found.");
+      if (order.postedToStock) return fail("Everything received on this order is already in stock.");
       if (!order.receivedDate) return fail("Enter the received date before posting to stock.");
 
-      const lines = orderItems.filter((l) => l.orderId === order.orderId && l.receivedQty > 0);
-      if (lines.length === 0) return fail("No received quantities to post.");
-      for (const line of lines) {
+      const orderLines = orderItems.filter((l) => l.orderId === order.orderId);
+      const lineIds = Object.keys(locationByLine);
+      if (lineIds.length === 0) return fail("Tick at least one item to add to stock.");
+      if (Object.keys(priceByLine).some((lineId) => !(lineId in locationByLine))) return fail("One of the priced items isn't being added to stock.");
+      const lines: OrderItem[] = [];
+      for (const lineId of lineIds) {
+        const line = orderLines.find((l) => l.id === lineId);
+        if (!line) return fail("One of the items isn't on this order any more. Reload the page.");
+        if (line.receivedQty <= 0) return fail(`Nothing of ${line.itemCode} was received.`);
+        if (line.postedLocation) return fail(`${line.itemCode} is already in stock.`);
         const loc = locationByLine[line.id];
-        if (!loc || !locations.some((l) => l.locationNumber === loc))
-          return fail(`Choose a store location for ${line.itemCode}.`);
+        if (!loc || !locations.some((l) => l.locationNumber === loc)) return fail(`Choose a store location for ${line.itemCode}.`);
+        const price = priceByLine[line.id];
+        const err =
+          price === undefined ? null : validatePrice(line.itemCode, Math.max(line.orderedQty, line.invoicedQty, line.receivedQty), price, line.discount);
+        if (err) return fail(err);
+        lines.push(line);
       }
+
+      // Prices as on Raigam's invoice; the bill total is worked out again from the invoices
+      const posted = new Map(
+        lines.map((l) => [
+          l.id,
+          { ...l, unitPrice: priceByLine[l.id] === undefined ? l.unitPrice : round2(priceByLine[l.id]), postedLocation: locationByLine[l.id] },
+        ]),
+      );
+      const nextItems = orderItems.map((l) => posted.get(l.id) ?? l);
+      const allIn = nextItems.every((l) => l.orderId !== order.orderId || l.receivedQty <= 0 || !!l.postedLocation);
 
       const stock = receiveIntoStock(
         get().stock,
         lines.map((l) => ({ sapCode: l.itemCode, locationNumber: locationByLine[l.id], qty: l.receivedQty })),
         getToday(),
       );
+      // Cost price = net price per unit after the line discount and its invoice's discount, as for a load
+      // (free items, price 0, and items on no invoice leave it alone)
+      const percentOf = new Map(orderInvoices.map((i) => [i.id, i.discountPercent]));
+      const netCost = new Map(
+        [...posted.values()]
+          .filter((l) => l.unitPrice > 0 && l.invoiceId && l.invoicedQty > 0)
+          .map((l) => [l.itemCode, netUnitCost({ qty: l.invoicedQty, unitPrice: l.unitPrice, discount: l.discount }, percentOf.get(l.invoiceId) ?? 0)]),
+      );
 
       set((s) => ({
         stock,
-        orders: s.orders.map((o) => (o.id === id ? { ...o, postedToStock: true } : o)),
-        orderItems: s.orderItems.map((l) =>
-          l.orderId === order.orderId && l.receivedQty > 0 ? { ...l, postedLocation: locationByLine[l.id] } : l,
-        ),
+        orders: s.orders.map((o) => (o.id === id ? { ...totalled(o, orderInvoices, nextItems), postedToStock: allIn } : o)),
+        orderItems: nextItems,
+        items: s.items.map((i) => (netCost.has(i.sapCode) ? { ...i, costPrice: netCost.get(i.sapCode)! } : i)),
       }));
       return ok(id);
     },
@@ -921,9 +1089,9 @@ export const createCore =
       const { orders, orderItems } = get();
       const order = orders.find((o) => o.id === id);
       if (!order) return fail("Order not found.");
-      if (!order.postedToStock) return fail("This order is not posted to stock.");
 
       const lines = orderItems.filter((l) => l.orderId === order.orderId && l.postedLocation && l.receivedQty > 0);
+      if (lines.length === 0) return fail("Nothing from this order is in stock.");
       const today = getToday();
       const stock = [...get().stock];
       for (const line of lines) {
@@ -944,11 +1112,11 @@ export const createCore =
       return ok(id);
     },
     receiveLoad: (input) => {
-      const { orders, items, locations } = get();
+      const { orders, orderInvoices, items, locations } = get();
       const invoiceNumber = input.invoiceNumber.trim();
       if (!invoiceNumber) return fail("Enter the invoice number.");
-      const dup = duplicateInvoice(orders, invoiceNumber);
-      if (dup) return fail(`Invoice ${invoiceNumber} is already entered as ${dup.orderId}.`);
+      const dup = duplicateInvoice(orderInvoices, invoiceNumber);
+      if (dup) return fail(`Invoice ${invoiceNumber} is already entered on ${dup.orderId}.`);
       if (!input.deliveryDate) return fail("Enter the delivery date.");
       const discountPercent = round2(input.discountPercent || 0);
       const pctErr = validateDiscountPercent(discountPercent);
@@ -972,35 +1140,44 @@ export const createCore =
       }
 
       const orderId = nextOrderId(orders);
+      const invoice: OrderInvoice = {
+        id: newId(),
+        orderId,
+        invoiceNumber,
+        poNumber: input.poNumber.trim(),
+        company: (input.company ?? "").trim(),
+        invoiceDate: input.deliveryDate,
+        discountPercent,
+      };
       const lines: OrderItem[] = input.lines.map((l) => ({
         id: newId(),
         orderId,
         itemCode: l.itemCode,
         orderedQty: l.qty,
+        invoiceId: invoice.id,
+        invoicedQty: l.qty,
         receivedQty: l.qty,
         unitPrice: round2(l.unitPrice),
         discount: round2(l.discount),
         remarks: "",
         postedLocation: locationOf.get(l.itemCode)!,
       }));
-      const order: Order = {
-        id: newId(),
-        orderId,
-        invoiceNumber,
-        poNumber: input.poNumber.trim(),
-        orderDate: input.deliveryDate,
-        receivedDate: input.deliveryDate,
-        receivedTime: "",
-        ...cleanOrderPayment(payment),
-        totalBillAmount: invoiceDiscount(
-          lines.reduce((sum, l) => sum + orderLineValue(l, { receivedDate: input.deliveryDate }), 0),
-          discountPercent,
-        ).total,
-        discountPercent,
-        postedToStock: true,
-        territory: "",
-        requiredDate: "",
-      };
+      const order = totalled(
+        {
+          id: newId(),
+          orderId,
+          orderDate: input.deliveryDate,
+          receivedDate: input.deliveryDate,
+          receivedTime: "",
+          ...cleanOrderPayment(payment),
+          totalBillAmount: 0,
+          postedToStock: true,
+          territory: "",
+          requiredDate: "",
+        },
+        [invoice],
+        lines,
+      );
       const stock = receiveIntoStock(
         get().stock,
         input.lines.map((l) => ({ sapCode: l.itemCode, locationNumber: locationOf.get(l.itemCode)!, qty: l.qty })),
@@ -1015,6 +1192,7 @@ export const createCore =
 
       set((s) => ({
         orders: [...s.orders, order],
+        orderInvoices: [...s.orderInvoices, invoice],
         orderItems: [...s.orderItems, ...lines],
         stock,
         items: s.items.map((i) => (netCost.has(i.sapCode) ? { ...i, costPrice: netCost.get(i.sapCode)! } : i)),
@@ -1024,44 +1202,59 @@ export const createCore =
 
     // ---------- Order items (individual lines) ----------
     addOrderItem: (input) => {
-      const { orders, orderItems, items } = get();
+      const { orders, orderInvoices, orderItems, items } = get();
       const order = orders.find((o) => o.orderId === input.orderId);
       if (!order) return fail("Select a valid order.");
-      if (order.postedToStock) return fail(`${order.orderId} is posted to stock and locked.`);
-      const err = validateLine(input, items);
+      if (anyPosted(orderItems, order.orderId)) return fail(`${order.orderId} is posted to stock and locked.`);
+      const invoiceId = input.invoiceId ?? "";
+      const line: OrderItem = { ...cleanLine(input), invoiceId, invoicedQty: invoiceId ? (input.invoicedQty ?? 0) : 0, orderId: input.orderId, id: newId() };
+      if (invoiceId && !orderInvoices.some((i) => i.id === invoiceId && i.orderId === order.orderId)) return fail("That invoice isn't on this order.");
+      const err = validateLine(line, items);
       if (err) return fail(err);
       if (orderItems.some((l) => l.orderId === input.orderId && l.itemCode === input.itemCode))
         return fail(`${input.itemCode} is already in ${input.orderId}.`);
-      const line: OrderItem = { ...cleanLine(input), orderId: input.orderId, id: newId() };
-      set((s) => ({ orderItems: [...s.orderItems, line] }));
+      const nextItems = [...orderItems, line];
+      set({ orderItems: nextItems, orders: orders.map((o) => (o.id === order.id ? totalled(o, orderInvoices, nextItems) : o)) });
       return ok(line.id);
     },
     updateOrderItem: (id, input) => {
-      const { orders, orderItems, items } = get();
+      const { orders, orderInvoices, orderItems, items } = get();
       const current = orderItems.find((l) => l.id === id);
       if (!current) return fail("Order item not found.");
-      const from = orders.find((o) => o.orderId === current.orderId);
       const to = orders.find((o) => o.orderId === input.orderId);
       if (!to) return fail("Select a valid order.");
-      if (from?.postedToStock || to.postedToStock) return fail("Posted orders are locked. Reverse the posting first.");
-      const err = validateLine(input, items);
+      if (anyPosted(orderItems, current.orderId) || anyPosted(orderItems, to.orderId)) return fail("Posted orders are locked. Reverse the posting first.");
+      // Moved to another order: it's off this order's invoice
+      const sameOrder = to.orderId === current.orderId;
+      const invoiceId = input.invoiceId ?? (sameOrder ? current.invoiceId : "");
+      const line: OrderItem = {
+        ...current,
+        ...cleanLine(input),
+        orderId: input.orderId,
+        invoiceId,
+        invoicedQty: invoiceId ? (input.invoicedQty ?? (sameOrder ? current.invoicedQty : 0)) : 0,
+      };
+      if (invoiceId && !orderInvoices.some((i) => i.id === invoiceId && i.orderId === to.orderId)) return fail("That invoice isn't on this order.");
+      const err = validateLine(line, items);
       if (err) return fail(err);
       if (orderItems.some((l) => l.id !== id && l.orderId === input.orderId && l.itemCode === input.itemCode))
         return fail(`${input.itemCode} is already in ${input.orderId}.`);
-      set((s) => ({
-        orderItems: s.orderItems.map((l) => (l.id === id ? { ...l, ...cleanLine(input), orderId: input.orderId } : l)),
-      }));
+      const nextItems = orderItems.map((l) => (l.id === id ? line : l));
+      set({
+        orderItems: nextItems,
+        orders: orders.map((o) => (o.orderId === current.orderId || o.orderId === to.orderId ? totalled(o, orderInvoices, nextItems) : o)),
+      });
       return ok(id);
     },
     deleteOrderItem: (id) => {
-      const { orders, orderItems } = get();
+      const { orders, orderInvoices, orderItems } = get();
       const line = orderItems.find((l) => l.id === id);
       if (!line) return fail("Order item not found.");
-      if (orders.find((o) => o.orderId === line.orderId)?.postedToStock)
-        return fail(`${line.orderId} is posted to stock and locked.`);
+      if (anyPosted(orderItems, line.orderId)) return fail(`${line.orderId} is posted to stock and locked.`);
       if (orderItems.filter((l) => l.orderId === line.orderId).length === 1)
         return fail(`This is the only item in ${line.orderId}. Delete the order instead.`);
-      set((s) => ({ orderItems: s.orderItems.filter((l) => l.id !== id) }));
+      const nextItems = orderItems.filter((l) => l.id !== id);
+      set({ orderItems: nextItems, orders: orders.map((o) => (o.orderId === line.orderId ? totalled(o, orderInvoices, nextItems) : o)) });
       return ok();
     },
 

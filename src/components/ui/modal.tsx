@@ -4,7 +4,7 @@ import { X } from "lucide-react";
 import { useEffect, useId, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
-const widths = { sm: "max-w-md", md: "max-w-xl", lg: "max-w-3xl" };
+const widths = { sm: "max-w-md", md: "max-w-xl", lg: "max-w-3xl", xl: "max-w-5xl" };
 
 /**
  * Rendered inline (not portalled) on purpose: when Next.js hides a route with

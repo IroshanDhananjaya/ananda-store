@@ -13,11 +13,13 @@ import {
   MapPin,
   Menu,
   Package,
+  PackageX,
   Receipt,
   RotateCcw,
   Route,
   Store,
   TrendingUp,
+  Trophy,
   Warehouse,
   X,
   type LucideIcon,
@@ -27,6 +29,7 @@ import { usePathname } from "next/navigation";
 import { startTransition, Suspense, useEffect, useState, type ReactNode } from "react";
 import { Toaster, toast } from "sonner";
 import { LogoMark } from "@/components/logo";
+import { ChequeReminder } from "@/components/orders/cheque-reminder";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Button } from "@/components/ui/button";
 import { signOut } from "@/lib/actions";
@@ -46,6 +49,7 @@ const nav: { title: string | null; items: NavItem[] }[] = [
       // Bills (/sales/…) open from here
       { href: "/invoices", label: "Daily Invoices", icon: CalendarDays, also: "/sales" },
       { href: "/free-issues", label: "Free Issues", icon: Gift },
+      { href: "/top-items", label: "Top Selling Items", icon: Trophy },
       { href: "/payments", label: "Payments", icon: HandCoins },
       { href: "/cheques", label: "Cheques & Credit", icon: Landmark },
     ],
@@ -62,6 +66,7 @@ const nav: { title: string | null; items: NavItem[] }[] = [
     items: [
       { href: "/orders", label: "Purchase Orders", icon: ClipboardList },
       { href: "/order-items", label: "Order Items", icon: ListChecks },
+      { href: "/order-differences", label: "Missing & Not Ordered", icon: PackageX },
     ],
   },
   {
@@ -286,7 +291,17 @@ export function AppShell({ children }: { children: ReactNode }) {
         </header>
 
         <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
-          {loaded ? children : loadError ? <LoadError message={loadError} onRetry={() => startTransition(() => reload())} /> : <LoadingScreen />}
+          {loaded ? (
+            <>
+              {/* Raigam cheques about to be deposited, on every page */}
+              <ChequeReminder />
+              {children}
+            </>
+          ) : loadError ? (
+            <LoadError message={loadError} onRetry={() => startTransition(() => reload())} />
+          ) : (
+            <LoadingScreen />
+          )}
         </main>
       </div>
 

@@ -44,9 +44,6 @@ export type Order = {
   id: string;
   /** Business key, e.g. "ORD - 0001" */
   orderId: string;
-  invoiceNumber: string;
-  /** Raigam's purchase order number, from the invoice */
-  poNumber: string;
   /** ISO date (YYYY-MM-DD) */
   orderDate: string;
   /** ISO date, empty until the delivery arrives */
@@ -63,16 +60,36 @@ export type Order = {
   chequeDepositDate: string;
   /** Transfer reference, slip or receipt number, or a note */
   paymentReference: string;
-  /** What we owe Raigam: the lines total after the invoice discount */
+  /**
+   * What we owe Raigam: each invoice's lines total less its own discount %, added up
+   * (before the goods arrive: the ordered items at their prices). Worked out by core.ts.
+   */
   totalBillAmount: number;
-  /** Raigam's "Discount % for Total Invoice" (0 = none) */
-  discountPercent: number;
-  /** True once received quantities have been added to stock */
+  /** True once every received item is in stock */
   postedToStock: boolean;
   /** Raigam territory written on the goods order sheet */
   territory: string;
   /** ISO date the goods are needed by (order sheet's "Required Date"); empty = not given */
   requiredDate: string;
+};
+
+/**
+ * A Raigam invoice an order's goods came on. One order can come on several (Raigam Marketing
+ * Services, Wayamba Salterns, Eastern Salt, …), each with its own number, PO and discount %.
+ */
+export type OrderInvoice = {
+  id: string;
+  /** References Order.orderId */
+  orderId: string;
+  invoiceNumber: string;
+  /** Raigam's purchase order number on the invoice */
+  poNumber: string;
+  /** The Raigam company that billed it, e.g. Raigam Wayamba Salterns PLC; "" = not entered */
+  company: string;
+  /** ISO date on the invoice; "" = not entered */
+  invoiceDate: string;
+  /** "Discount % for Total Invoice", taken off this invoice's lines total (0 = none) */
+  discountPercent: number;
 };
 
 /** "Order Item Details" sheet — one line per item in an order */
@@ -82,14 +99,20 @@ export type OrderItem = {
   orderId: string;
   /** References Item.sapCode */
   itemCode: string;
+  /** 0 = it came without being ordered */
   orderedQty: number;
+  /** The Raigam invoice it came on (OrderInvoice.id); "" = on no invoice (not supplied) */
+  invoiceId: string;
+  /** Qty on that invoice: what Raigam charges for */
+  invoicedQty: number;
+  /** What arrived (counted); goes into stock */
   receivedQty: number;
   /** Price per unit on the supplier invoice */
   unitPrice: number;
   /** Rs. off the whole line */
   discount: number;
   remarks: string;
-  /** Location the received qty was posted to (set when the order is posted) */
+  /** Location the received qty was added to stock at; set once this item is in stock */
   postedLocation?: string;
 };
 
@@ -332,8 +355,10 @@ export type RaigamLink = {
   appId: string;
 };
 
-export type OrderStatus = "Pending" | "Received" | "Posted";
-export type LineStatus = "Pending" | "Match" | "Unmatch";
+/** Partial = some received items are in stock, some still to add */
+export type OrderStatus = "Pending" | "Received" | "Partial" | "Posted";
+/** Missing = ordered, nothing came; Extra = came without being ordered */
+export type LineStatus = "Pending" | "Match" | "Unmatch" | "Missing" | "Extra";
 
 /** `notes`: parts of a batch change that couldn't be done (e.g. bills a sync left out), the rest is saved */
 export type Result = { ok: true; id?: string; notes?: string[] } | { ok: false; error: string };
@@ -341,16 +366,31 @@ export type Result = { ok: true; id?: string; notes?: string[] } | { ok: false; 
 export type ItemInput = Omit<Item, "id">;
 export type LocationInput = Omit<StoreLocation, "id">;
 export type StockInput = Omit<StockRecord, "id">;
-export type OrderInput = Omit<Order, "id" | "orderId" | "postedToStock">;
+export type OrderInput = Omit<Order, "id" | "orderId" | "postedToStock" | "totalBillAmount">;
 /** One payment per Raigam bill */
 export type OrderPayment = Pick<Order, "paymentMethod" | "paidDate" | "chequeNumber" | "chequeDepositDate" | "paymentReference">;
-/** Raigam's invoice for an order: not known when the order is made, entered once it comes */
-export type OrderInvoice = Pick<Order, "invoiceNumber" | "poNumber">;
-export type OrderLineInput = Pick<
-  OrderItem,
-  "itemCode" | "orderedQty" | "receivedQty" | "unitPrice" | "discount" | "remarks"
->;
+/** A Raigam invoice on an order: not known when the order is made, entered once it comes */
+export type OrderInvoiceInput = Omit<OrderInvoice, "id" | "orderId">;
+/** `invoiceId` / `invoicedQty` left out = the line keeps what it had (matched by item code) */
+export type OrderLineInput = Pick<OrderItem, "itemCode" | "orderedQty" | "receivedQty" | "unitPrice" | "discount" | "remarks"> &
+  Partial<Pick<OrderItem, "invoiceId" | "invoicedQty">>;
 export type OrderItemInput = OrderLineInput & { orderId: string };
+/** Receiving an order: when it came, the Raigam invoices it came on, and each item's count */
+export type ReceiveOrderInput = {
+  receivedDate: string;
+  receivedTime: string;
+  /** `key`: the invoice's id, or any new key for one added here. Invoices left out are deleted. */
+  invoices: (OrderInvoiceInput & { key: string })[];
+  /**
+   * Every item on the order (`id` = its line). A line with no `id` came without being ordered;
+   * such a line can be left out to take it off again.
+   */
+  lines: (Pick<OrderItem, "itemCode" | "invoicedQty" | "receivedQty" | "unitPrice" | "discount" | "remarks"> & {
+    id?: string;
+    /** The invoice's key; "" = on no invoice */
+    invoiceKey: string;
+  })[];
+};
 export type RouteInput = Omit<Route, "id">;
 export type ShopInput = Omit<Shop, "id">;
 /** Cost price is filled in by the store from the item master */
@@ -386,6 +426,8 @@ export type LoadInput = {
 export type ReceiveLoadInput = {
   invoiceNumber: string;
   poNumber: string;
+  /** The Raigam company that billed it; left out = not entered */
+  company?: string;
   /** ISO date the load arrived */
   deliveryDate: string;
   /** "Discount % for Total Invoice", taken off the lines total */

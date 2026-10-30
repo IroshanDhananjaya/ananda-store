@@ -16,7 +16,8 @@
     "db:clear": "tsx scripts/db.ts clear",
     "db:import-items": "tsx scripts/db.ts import-items",
     "db:import-load": "tsx scripts/db.ts import-load",
-    "db:import-order": "tsx scripts/db.ts import-order"
+    "db:import-order": "tsx scripts/db.ts import-order",
+    "db:import-invoices": "tsx scripts/db.ts import-invoices"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",

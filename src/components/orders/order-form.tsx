@@ -11,11 +11,11 @@ import { SearchSelect } from "@/components/ui/search-select";
 import { Card, CardHeader } from "@/components/ui/layout";
 import { EmptyRow, Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { useAppStore, useItemMap, useLastInvoicePrices } from "@/lib/store";
-import type { LineStatus, Order, OrderInput, OrderItem, OrderLineInput } from "@/lib/types";
-import { cn, formatMoney, formatQty, invoiceDiscount, newId, nextOrderId, NOT_PAID, nowTime, orderLineValue, paymentOf, round2, todayISO } from "@/lib/utils";
+import type { Order, OrderInput, OrderItem, OrderLineInput } from "@/lib/types";
+import { cn, formatMoney, formatQty, lineStatus, newId, nextOrderId, NOT_PAID, nowTime, orderLineValue, orderTotal, paymentOf, todayISO } from "@/lib/utils";
 import { OrderPaymentFields, orderPaymentErrors } from "./order-payment";
 
-type HeaderDraft = Omit<OrderInput, "totalBillAmount" | "discountPercent">;
+type HeaderDraft = OrderInput;
 type LineDraft = { key: string; itemCode: string; orderedQty: string; receivedQty: string; unitPrice: string; discount: string; remarks: string };
 type DraftErrors = Partial<Record<"itemCode" | "orderedQty" | "receivedQty" | "unitPrice" | "discount", string>>;
 
@@ -29,8 +29,9 @@ const numbersOf = (l: LineDraft) => ({
 });
 
 const isWhole = (v: string) => v !== "" && Number.isInteger(Number(v)) && Number(v) >= 0;
-/** Has what a line needs (items picked from Low stock arrive without a quantity) */
-const isComplete = (l: LineDraft) => !!l.itemCode && isWhole(l.orderedQty) && toNumber(l.orderedQty) > 0 && l.unitPrice !== "";
+/** Has what a line needs (items picked from Low stock arrive without a quantity); ordered 0 = it came without being ordered */
+const isComplete = (l: LineDraft) =>
+  !!l.itemCode && isWhole(l.orderedQty) && (toNumber(l.orderedQty) > 0 || toNumber(l.receivedQty) > 0) && l.unitPrice !== "";
 
 /** Focus a field once React has drawn it */
 const focusField = (id: string) => requestAnimationFrame(() => document.getElementById(id)?.focus());
@@ -51,6 +52,7 @@ export function OrderForm({
 }) {
   const items = useAppStore((s) => s.items);
   const orders = useAppStore((s) => s.orders);
+  const orderInvoices = useAppStore((s) => s.orderInvoices);
   const createOrder = useAppStore((s) => s.createOrder);
   const updateOrder = useAppStore((s) => s.updateOrder);
   const itemMap = useItemMap();
@@ -58,8 +60,6 @@ export function OrderForm({
   const priceFor = (itemCode: string) => String(lastPrice.get(itemCode) ?? "");
 
   const [header, setHeader] = useState<HeaderDraft>(() => ({
-    invoiceNumber: order?.invoiceNumber ?? "",
-    poNumber: order?.poNumber ?? "",
     orderDate: order?.orderDate ?? todayISO(),
     receivedDate: order?.receivedDate ?? "",
     receivedTime: order?.receivedTime ?? "",
@@ -88,25 +88,24 @@ export function OrderForm({
   const [editingKey, setEditingKey] = useState<string | null>(() => startLines().find((l) => !isComplete(l))?.key ?? null);
   const [draftErrors, setDraftErrors] = useState<DraftErrors>({});
 
-  const [discountPercent, setDiscountPercent] = useState(() => (order?.discountPercent ? String(order.discountPercent) : ""));
-
-  // Invoice value: qty × price − discount per line (received qty once the order has arrived), less the invoice discount
-  const calcAmount = (rows: Parameters<typeof orderLineValue>[0][], receivedDate: string, percent: number) =>
-    invoiceDiscount(round2(rows.reduce((sum, l) => sum + orderLineValue(l, { receivedDate }), 0)), percent);
-
-  // null = follow the calculated amount; a string = the user typed the invoice amount
-  const [billInput, setBillInput] = useState<string | null>(() =>
-    order && order.totalBillAmount !== calcAmount(initialLines, order.receivedDate, order.discountPercent).total
-      ? String(order.totalBillAmount)
-      : null,
-  );
+  // Each item keeps the Raigam invoice it came on (set when receiving the order); the bill is worked out from the invoices
+  const savedLine = new Map(initialLines.map((l) => [l.itemCode, l]));
+  const withInvoice = (l: LineDraft) => ({
+    ...numbersOf(l),
+    invoiceId: savedLine.get(l.itemCode)?.invoiceId ?? "",
+    invoicedQty: savedLine.get(l.itemCode)?.invoicedQty ?? 0,
+  });
+  const valueOf = (l: LineDraft) => orderLineValue(withInvoice(l), header);
   const [headerErrors, setHeaderErrors] = useState<Partial<Record<keyof HeaderDraft, string>>>({});
   const [badLines, setBadLines] = useState<Set<string>>(() => new Set());
   const [formError, setFormError] = useState<string>();
 
-  const pct = toNumber(discountPercent);
-  const { discount: invoiceOff, total: calculated } = calcAmount(lines.map(numbersOf), header.receivedDate, pct);
-  const billValue = billInput ?? String(calculated);
+  const orderId = order?.orderId ?? "";
+  const billTotal = orderTotal(
+    { orderId, receivedDate: header.receivedDate },
+    orderInvoices,
+    lines.map((l): OrderItem => ({ ...withInvoice(l), id: l.key, orderId, itemCode: l.itemCode, remarks: l.remarks })),
+  );
   const totalOrdered = lines.reduce((s, l) => s + toNumber(l.orderedQty), 0);
   const totalReceived = lines.reduce((s, l) => s + toNumber(l.receivedQty), 0);
   const draftItem = itemMap.get(draft.itemCode);
@@ -133,7 +132,7 @@ export function OrderForm({
     const e: DraftErrors = {};
     if (!d.itemCode) e.itemCode = "Pick an item.";
     else if (lines.some((l) => l.itemCode === d.itemCode && l.key !== d.key)) e.itemCode = "Already in the list below. Edit it there.";
-    if (!isWhole(d.orderedQty) || toNumber(d.orderedQty) === 0) e.orderedQty = "A whole number above 0.";
+    if (!isWhole(d.orderedQty) || (toNumber(d.orderedQty) === 0 && !(toNumber(d.receivedQty) > 0))) e.orderedQty = "A whole number above 0.";
     if (!isWhole(d.receivedQty)) e.receivedQty = "A whole number, 0 or more.";
     if (d.unitPrice === "" || toNumber(d.unitPrice) < 0) e.unitPrice = "Enter the price.";
     const n = numbersOf(d);
@@ -187,11 +186,6 @@ export function OrderForm({
     saveDraft();
   }
 
-  function lineStatus(l: LineDraft): LineStatus {
-    if (!header.receivedDate) return "Pending";
-    return toNumber(l.orderedQty) === toNumber(l.receivedQty) ? "Match" : "Unmatch";
-  }
-
   function markReceivedNow() {
     setHeader((h) => ({ ...h, receivedDate: todayISO(), receivedTime: nowTime() }));
   }
@@ -220,8 +214,6 @@ export function OrderForm({
       hErr.receivedDate = "Received quantities are entered — add the received date.";
     }
 
-    if (billValue === "" || toNumber(billValue) < 0) general = general ?? "Total bill amount must be 0 or more.";
-    if (Number.isNaN(Number(discountPercent)) || pct < 0 || pct >= 100) general = general ?? "Invoice discount must be a % from 0 to 99.99.";
 
     setHeaderErrors(hErr);
     setBadLines(bad);
@@ -233,7 +225,7 @@ export function OrderForm({
     e.preventDefault();
     if (!validate()) return;
 
-    const input: OrderInput = { ...header, discountPercent: pct, totalBillAmount: round2(toNumber(billValue)) };
+    const input: OrderInput = header;
     const lineInputs: OrderLineInput[] = lines.map((l) => ({
       itemCode: l.itemCode,
       orderedQty: toNumber(l.orderedQty),
@@ -255,16 +247,13 @@ export function OrderForm({
     <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-6">
       <div className={cn("grid gap-6", !isNew && "lg:grid-cols-3")}>
         <Card className={cn(!isNew && "lg:col-span-2")}>
-          <CardHeader title="Order details" description="Supplier invoice and payment details." />
+          <CardHeader
+            title="Order details"
+            description={isNew ? "Order date and payment." : "Order date and payment. Raigam's invoices (number, PO, discount %) are on the order page."}
+          />
           <div className={cn("grid gap-4 p-5 sm:grid-cols-2", isNew ? "lg:grid-cols-4" : "xl:grid-cols-3")}>
             <Field label="Order ID">
               <ReadOnlyValue className="font-medium">{order?.orderId ?? nextOrderId(orders)}</ReadOnlyValue>
-            </Field>
-            <Field label="Invoice Number" htmlFor="invoiceNumber">
-              <Input id="invoiceNumber" value={header.invoiceNumber} onChange={setField("invoiceNumber")} placeholder="INV-RG-00000" />
-            </Field>
-            <Field label="PO Number" htmlFor="poNumber">
-              <Input id="poNumber" value={header.poNumber} onChange={setField("poNumber")} placeholder="PO-0000000" />
             </Field>
             <Field label="Order Date" htmlFor="orderDate" required error={headerErrors.orderDate}>
               <Input id="orderDate" type="date" value={header.orderDate} onChange={setField("orderDate")} aria-invalid={!!headerErrors.orderDate} />
@@ -274,6 +263,7 @@ export function OrderForm({
               onChange={(payment) => setHeader((h) => ({ ...h, ...payment }))}
               errors={headerErrors}
               idPrefix="order"
+              receivedDate={header.receivedDate}
             />
           </div>
         </Card>
@@ -435,7 +425,7 @@ export function OrderForm({
             <div className="flex items-end justify-between gap-3 sm:col-span-2 lg:col-span-2">
               <div className="pb-2">
                 <p className="text-xs text-slate-500">Line value</p>
-                <p className="text-base font-semibold text-slate-900 tabular-nums">{formatMoney(orderLineValue(numbersOf(draft), header))}</p>
+                <p className="text-base font-semibold text-slate-900 tabular-nums">{formatMoney(valueOf(draft))}</p>
               </div>
               <Button onClick={saveDraft} className="shrink-0">
                 {editingKey ? (
@@ -494,10 +484,10 @@ export function OrderForm({
                   {!isNew && <TD className="text-right tabular-nums">{formatQty(toNumber(l.receivedQty))}</TD>}
                   <TD className="text-right tabular-nums">{l.unitPrice === "" ? "—" : formatMoney(toNumber(l.unitPrice))}</TD>
                   <TD className="text-right tabular-nums">{toNumber(l.discount) ? formatMoney(toNumber(l.discount)) : "—"}</TD>
-                  <TD className="text-right font-medium text-slate-900 tabular-nums">{formatMoney(orderLineValue(numbersOf(l), header))}</TD>
+                  <TD className="text-right font-medium text-slate-900 tabular-nums">{formatMoney(valueOf(l))}</TD>
                   {!isNew && (
                     <TD>
-                      <LineStatusBadge status={lineStatus(l)} />
+                      <LineStatusBadge status={lineStatus(numbersOf(l), header)} />
                     </TD>
                   )}
                   <TD className="max-w-56 whitespace-normal text-slate-600">{l.remarks || <span className="text-slate-400">—</span>}</TD>
@@ -526,55 +516,19 @@ export function OrderForm({
       </Card>
 
       <Card>
-        <div className="grid gap-4 p-5 sm:grid-cols-2 lg:grid-cols-5 lg:items-end">
+        <div className="grid gap-4 p-5 sm:grid-cols-2 lg:grid-cols-3 lg:items-end">
           <Field label="Total Item Quantity" hint={isNew ? undefined : `${formatQty(totalReceived)} received`}>
             <ReadOnlyValue className="font-semibold tabular-nums">{formatQty(totalOrdered)}</ReadOnlyValue>
           </Field>
           <Field
-            label="Discount % for Total Invoice"
-            htmlFor="discountPercent"
-            hint={invoiceOff ? `${formatMoney(invoiceOff)} off the lines total` : "On the last page of the invoice"}
-          >
-            <Input
-              id="discountPercent"
-              type="number"
-              min={0}
-              max={99.99}
-              step="0.01"
-              inputMode="decimal"
-              value={discountPercent}
-              onChange={(e) => setDiscountPercent(e.target.value)}
-              placeholder="0"
-              className="text-right tabular-nums"
-            />
-          </Field>
-          <Field label="Calculated value" hint={`Qty × price − discount, all lines${pct ? `, less ${pct}%` : ""}`}>
-            <ReadOnlyValue className="tabular-nums">{formatMoney(calculated)}</ReadOnlyValue>
-          </Field>
-          <Field
-            label="Total Bill Amount (Rs.)"
-            htmlFor="totalBill"
-            required
+            label="Total Bill Amount"
             hint={
-              billInput === null ? (
-                "Following calculated value — type to enter the invoice amount."
-              ) : (
-                <button type="button" className="font-medium text-brand-700 hover:underline" onClick={() => setBillInput(null)}>
-                  Use calculated value
-                </button>
-              )
+              header.receivedDate
+                ? "Each Raigam invoice's items less its own discount %, added up (qty on the invoice × price − discount)."
+                : "Ordered qty × price − discount, all items. Raigam's discount comes off when the invoices are added."
             }
           >
-            <Input
-              id="totalBill"
-              type="number"
-              min={0}
-              step="0.01"
-              inputMode="decimal"
-              value={billValue}
-              onChange={(e) => setBillInput(e.target.value)}
-              className="font-semibold tabular-nums"
-            />
+            <ReadOnlyValue className="font-semibold tabular-nums">{formatMoney(billTotal)}</ReadOnlyValue>
           </Field>
           <div className="flex gap-2 sm:col-span-2 lg:col-span-1 lg:justify-end lg:pb-5">
             <Link href={cancelHref} className={buttonClass("outline", "md", "flex-1 lg:flex-none")}>

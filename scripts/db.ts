@@ -10,13 +10,15 @@
 //   pnpm db:import-load <file> --yes    save it, like Receive new load (saves a backup first)
 //   pnpm db:import-order <file>     check a JSON goods order sheet (the Order Qty filled in) and show the order it makes
 //   pnpm db:import-order <file> --yes   save it, like New purchase order (saves a backup first)
+//   pnpm db:import-invoices <file>  check the Raigam invoices an order came on (JSON) and show what they change
+//   pnpm db:import-invoices <file> --yes   save them on the order, like Receive order (saves a backup first)
 
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { migrate as runMigrations } from "drizzle-orm/postgres-js/migrator";
 import { connect } from "../src/db/connect";
 import { applyAction, fetchData, replaceAll } from "../src/db/repo";
 import { DATA_KEYS, emptyData, seedData, type Data } from "../src/lib/core";
-import type { ItemInput, OrderInput, OrderLineInput, ReceiveLoadInput, StoreLocation } from "../src/lib/types";
+import type { ItemInput, Order, OrderInput, OrderInvoice, OrderLineInput, ReceiveLoadInput, ReceiveOrderInput, StoreLocation } from "../src/lib/types";
 import {
   formatDate,
   formatMoney,
@@ -72,12 +74,41 @@ async function backup() {
   console.log(`Saved ${count(data)} records to ${file}`);
 }
 
+/**
+ * Backups made before orders could have several invoices keep the invoice number, PO and
+ * discount % on the order: they become the order's one invoice, with its received items on it.
+ */
+function withOrderInvoices(data: Data): Data {
+  if (data.orderInvoices.length > 0) return data;
+  type OldOrder = Order & { invoiceNumber?: string; poNumber?: string; discountPercent?: number };
+  const invoices: OrderInvoice[] = (data.orders as OldOrder[])
+    .filter((o) => o.receivedDate || o.invoiceNumber || o.poNumber || o.discountPercent)
+    .map((o) => ({
+      id: `inv-${o.id}`,
+      orderId: o.orderId,
+      invoiceNumber: o.invoiceNumber ?? "",
+      poNumber: o.poNumber ?? "",
+      company: "",
+      invoiceDate: o.receivedDate,
+      discountPercent: o.discountPercent ?? 0,
+    }));
+  const received = new Map(data.orders.filter((o) => o.receivedDate).map((o) => [o.orderId, `inv-${o.id}`]));
+  return {
+    ...data,
+    orderInvoices: invoices,
+    orderItems: data.orderItems.map((l) => {
+      const invoiceId = l.receivedQty > 0 ? received.get(l.orderId) : undefined;
+      return { ...l, invoiceId: l.invoiceId ?? invoiceId ?? "", invoicedQty: l.invoicedQty ?? (invoiceId ? l.receivedQty : 0) };
+    }),
+  };
+}
+
 async function restore() {
   const file = rest.find((a) => !a.startsWith("--"));
   if (!file) throw new Error("Give the backup file, e.g. pnpm db:restore backups/raigam-2026-10-22.json --yes");
   const { app, data: saved } = JSON.parse(readFileSync(file, "utf8")) as { app?: string; data?: Partial<Data> };
   // A backup made before a table was added doesn't have it: that table starts empty
-  const data = saved && { ...emptyData(), ...saved };
+  const data = saved && withOrderInvoices({ ...emptyData(), ...saved });
   if (app !== "raigam-store" || !data || !DATA_KEYS.every((k) => Array.isArray(data[k]))) throw new Error(`${file} is not a backup made by pnpm db:backup.`);
   if (!rest.includes("--yes")) {
     throw new Error(`This replaces everything in the database with the ${count(data)} records in ${file}. Add --yes to go ahead.`);
@@ -244,11 +275,11 @@ async function importLoad() {
   const rows = Array.isArray(parsed) ? parsed : [parsed];
   if (rows.length === 0) throw new Error(`${file} has no loads.`);
 
-  const { items, locations, stock, orders } = await fetchData(db);
+  const { items, locations, stock, orders, orderInvoices } = await fetchData(db);
   if (locations.length === 0) throw new Error("There are no stock locations yet. Add one on the Stock Locations page first.");
   const bySapCode = new Map(items.map((i) => [i.sapCode, i]));
   const findLocation = locationFinder(locations);
-  const invoices = new Map(orders.map((o) => [o.invoiceNumber.trim().toUpperCase(), o.orderId]));
+  const invoices = new Map(orderInvoices.map((i) => [i.invoiceNumber.trim().toUpperCase(), i.orderId]));
   const orderIds = orders.map((o) => ({ orderId: o.orderId }));
   // Stock and cost prices as they'll be after each load, for the preview
   const stockQty = new Map(stock.map((r) => [`${r.sapCode}|${r.locationNumber}`, r.availableQty]));
@@ -438,14 +469,10 @@ async function importOrder() {
   await backup();
   // Same rules as New purchase order
   const input: OrderInput = {
-    invoiceNumber: "",
-    poNumber: "",
     orderDate: orderDate!,
     receivedDate: "",
     receivedTime: "",
     ...NOT_PAID,
-    totalBillAmount: total,
-    discountPercent: 0,
     territory,
     requiredDate: requiredDate ?? "",
   };
@@ -453,6 +480,162 @@ async function importOrder() {
   if (!result.ok) throw new Error(result.error);
   const saved = await fetchData(db);
   console.log(`Saved ${saved.orders.find((o) => o.id === result.id)?.orderId ?? "the order"}.`);
+}
+
+/**
+ * An order's Raigam invoices, typed up from photos of them: the goods of one order often come on several
+ * invoices (Raigam Marketing Services, Wayamba Salterns, Eastern Salt…), each with its own discount %.
+ * `itemCodes` maps a code printed on an invoice to the app's SAP code when they differ (e.g. an item
+ * saved as NO-SAP-001). A line's `received` is what arrived when it isn't everything on the invoice.
+ * Ordered items on none of the invoices are marked Missing; invoice items that weren't ordered are added.
+ * The invoices replace any the order had.
+ */
+type OrderInvoicesFile = {
+  orderId: string;
+  /** Left out = the order's received date, else the first invoice's date */
+  receivedDate?: string;
+  itemCodes?: Record<string, string>;
+  invoices: (Omit<LoadRow, "deliveryDate" | "lines"> & {
+    company?: string;
+    invoiceDate?: string;
+    lines: (LoadLineRow & { received?: number })[];
+  })[];
+};
+
+async function importInvoices() {
+  const file = rest.find((a) => !a.startsWith("--"));
+  if (!file) throw new Error("Give the invoices file, e.g. pnpm db:import-invoices invoices.json");
+  const row = JSON.parse(readFileSync(file, "utf8")) as OrderInvoicesFile;
+
+  const { items, orders, orderInvoices, orderItems } = await fetchData(db);
+  const order = orders.find((o) => o.orderId.replace(/\s+/g, "") === String(row?.orderId ?? "").replace(/\s+/g, "").toUpperCase());
+  if (!order) throw new Error(`Order "${row?.orderId ?? ""}" not found.`);
+  const lines = orderItems.filter((l) => l.orderId === order.orderId);
+  if (lines.some((l) => l.postedLocation)) throw new Error(`${order.orderId} has items in stock. Reverse the posting first.`);
+  const bySapCode = new Map(items.map((i) => [i.sapCode.toUpperCase(), i]));
+  const mine = orderInvoices.filter((i) => i.orderId === order.orderId);
+  const others = orderInvoices.filter((i) => i.orderId !== order.orderId);
+  const problems: string[] = [];
+  const invoiceRows = Array.isArray(row.invoices) ? row.invoices : [];
+  if (invoiceRows.length === 0) problems.push("no invoices");
+
+  const invoices: ReceiveOrderInput["invoices"] = [];
+  // App SAP code -> where it came
+  const came = new Map<string, { key: string; qty: number; received: number; unitPrice: number; discount: number }>();
+  const preview: string[] = [];
+  invoiceRows.forEach((inv, n) => {
+    const invoiceNumber = String(inv?.invoiceNumber ?? "").trim();
+    const where = `Invoice ${invoiceNumber || n + 1}`;
+    const problem = (msg: string) => problems.push(`${where}: ${msg}`);
+    const before = problems.length;
+    const dup = others.find((i) => invoiceNumber && i.invoiceNumber.toUpperCase() === invoiceNumber.toUpperCase());
+    if (dup) problem(`already entered on ${dup.orderId}`);
+    const invoiceDate = inv?.invoiceDate ? toISODate(inv.invoiceDate) : "";
+    if (invoiceDate === null) problem(`invoiceDate "${inv.invoiceDate}" isn't a date`);
+    const discountPercent = inv?.discountPercent === undefined ? 0 : toNum(inv.discountPercent);
+    if (!(discountPercent >= 0 && discountPercent < 100)) problem("discountPercent must be a number from 0 to 99.99");
+    // The same invoice already on the order keeps its id
+    const key = mine.find((i) => invoiceNumber && i.invoiceNumber.toUpperCase() === invoiceNumber.toUpperCase())?.id ?? `new-${n + 1}`;
+
+    let total = 0;
+    const shown: string[] = [];
+    (Array.isArray(inv?.lines) ? inv.lines : []).forEach((l, i) => {
+      const printed = String(l?.itemCode ?? "").trim().toUpperCase();
+      const code = String(row.itemCodes?.[printed] ?? row.itemCodes?.[l?.itemCode] ?? printed).toUpperCase();
+      const at = `item ${i + 1} (${printed}${code !== printed ? ` = ${code}` : ""})`;
+      const item = bySapCode.get(code);
+      if (!item) return problem(`${at}: not in Items (add it with pnpm db:import-items, or map it in itemCodes)`);
+      if (came.has(item.sapCode)) return problem(`${at}: ${item.sapCode} is on the invoices more than once`);
+      const qty = toNum(l.qty);
+      const unitPrice = toNum(l.unitPrice);
+      const discount = l.discount === undefined ? 0 : toNum(l.discount);
+      const received = l.received === undefined ? qty : toNum(l.received);
+      if (!Number.isInteger(qty) || qty <= 0) return problem(`${at}: qty must be a whole number above 0`);
+      if (!Number.isInteger(received) || received < 0) return problem(`${at}: received must be a whole number, 0 or more`);
+      if (!Number.isFinite(unitPrice) || unitPrice < 0) return problem(`${at}: unitPrice must be a number, 0 or more`);
+      if (!Number.isFinite(discount) || discount < 0) return problem(`${at}: discount must be a number, 0 or more`);
+      const value = lineValue({ qty, unitPrice, discount });
+      if (l.value !== undefined && !sameMoney(toNum(l.value), value)) {
+        return problem(`${at}: ${qty} × ${formatMoney(unitPrice)} − ${formatMoney(discount)} = ${formatMoney(value)}, but the invoice says ${formatMoney(toNum(l.value))}`);
+      }
+      total = round2(total + value);
+      came.set(item.sapCode, { key, qty, received, unitPrice, discount });
+      const line = lines.find((x) => x.itemCode === item.sapCode);
+      const notes = [
+        !line ? "NOT ORDERED" : line.orderedQty !== qty ? `ordered ${formatQty(line.orderedQty)}` : "",
+        line && line.unitPrice !== round2(unitPrice) ? `price was ${line.unitPrice ? formatMoney(line.unitPrice) : "not set"}` : "",
+        received !== qty ? `only ${formatQty(received)} arrived` : "",
+      ].filter(Boolean);
+      shown.push(
+        `  ${formatQty(qty).padStart(6)} × ${item.sapCode.padEnd(18)} ${item.description.padEnd(38)} @ ${formatMoney(unitPrice)} = ${formatMoney(value)}${notes.length ? `   (${notes.join(", ")})` : ""}`,
+      );
+    });
+
+    const { discount, total: grandTotal } = invoiceDiscount(total, discountPercent);
+    const checks = [
+      ["the items add up to", total, inv?.invoiceTotal, "the invoice total"],
+      [`${discountPercent}% of that is`, discount, inv?.discountTotal, "the discount total"],
+      ["the grand total works out to", grandTotal, inv?.grandTotal, "the invoice grand total"],
+    ] as const;
+    for (const [what, worked, onInvoice, name] of checks) {
+      if (onInvoice === undefined || problems.length > before || sameMoney(toNum(onInvoice), worked)) continue;
+      problem(`${what} ${formatMoney(worked)}, but ${name} is ${formatMoney(toNum(onInvoice))}`);
+    }
+    const company = String(inv?.company ?? "").trim();
+    invoices.push({ key, invoiceNumber, poNumber: String(inv?.poNumber ?? "").trim(), company, invoiceDate: invoiceDate ?? "", discountPercent });
+    preview.push(
+      `Invoice ${invoiceNumber || "(no number)"}${company ? ` · ${company}` : ""}${inv?.poNumber ? ` · PO ${inv.poNumber}` : ""}${invoiceDate ? ` · ${formatDate(invoiceDate)}` : ""}`,
+      ...shown,
+      `  ${formatMoney(total)} − ${discountPercent}% (${formatMoney(discount)}) = ${formatMoney(grandTotal)}\n`,
+    );
+  });
+
+  const receivedDate = row.receivedDate ? toISODate(row.receivedDate) : order.receivedDate || invoices[0]?.invoiceDate || "";
+  if (!receivedDate) problems.push("receivedDate is missing (or isn't a date)");
+  if (problems.length) throw new Error(`Nothing saved. Fix these in ${file}:\n  ${problems.join("\n  ")}`);
+
+  // Every item on the order: as on its invoice, or Missing; then invoice items that weren't ordered
+  const input: ReceiveOrderInput = {
+    receivedDate: receivedDate!,
+    receivedTime: order.receivedTime,
+    invoices,
+    lines: [
+      ...lines.map((l) => {
+        const got = came.get(l.itemCode);
+        return got
+          ? { id: l.id, itemCode: l.itemCode, invoiceKey: got.key, invoicedQty: got.qty, receivedQty: got.received, unitPrice: got.unitPrice, discount: got.discount, remarks: l.remarks }
+          : { id: l.id, itemCode: l.itemCode, invoiceKey: "", invoicedQty: 0, receivedQty: 0, unitPrice: l.unitPrice, discount: 0, remarks: l.remarks };
+      }),
+      ...[...came]
+        .filter(([code]) => !lines.some((l) => l.itemCode === code))
+        .map(([itemCode, got]) => ({ itemCode, invoiceKey: got.key, invoicedQty: got.qty, receivedQty: got.received, unitPrice: got.unitPrice, discount: got.discount, remarks: "" })),
+    ],
+  };
+
+  const missing = lines.filter((l) => !came.has(l.itemCode));
+  const dropped = mine.filter((i) => !invoices.some((x) => x.key === i.id));
+  console.log(`${order.orderId}  received ${formatDate(receivedDate!)}\n`);
+  console.log(preview.join("\n"));
+  if (missing.length) {
+    console.log(`Missing (ordered, on none of the invoices): ${missing.length}`);
+    for (const l of missing) console.log(`  ${formatQty(l.orderedQty).padStart(6)} × ${l.itemCode.padEnd(18)} ${bySapCode.get(l.itemCode.toUpperCase())?.description ?? ""}`);
+  }
+  if (dropped.length) console.log(`\nInvoices on the order now that these replace: ${dropped.map((i) => i.invoiceNumber || "(no number)").join(", ")}`);
+  // The same sums core.ts saves
+  const after = invoices.reduce((sum, i) => {
+    const on = input.lines.filter((l) => l.invoiceKey === i.key);
+    return sum + invoiceDiscount(round2(on.reduce((s, l) => s + lineValue({ qty: l.invoicedQty, unitPrice: l.unitPrice, discount: l.discount }), 0)), i.discountPercent).total;
+  }, 0);
+  console.log(`\nBill total ${formatMoney(order.totalBillAmount)} → ${formatMoney(round2(after))} (${invoices.length} invoices)\n`);
+  if (!rest.includes("--yes")) {
+    console.log("Nothing saved yet. Add --yes to save them on the order.");
+    return;
+  }
+
+  await backup();
+  const { result } = await applyAction(db, "receiveOrder", [order.id, input], todayISO());
+  if (!result.ok) throw new Error(result.error);
+  console.log(`Saved ${invoices.length} invoices on ${order.orderId}. Add the items to stock on its page.`);
 }
 
 const commands: Record<string, () => Promise<void>> = {
@@ -464,6 +647,7 @@ const commands: Record<string, () => Promise<void>> = {
   "import-items": importItems,
   "import-load": importLoad,
   "import-order": importOrder,
+  "import-invoices": importInvoices,
 };
 
 async function main() {

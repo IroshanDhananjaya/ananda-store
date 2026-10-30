@@ -108,10 +108,11 @@ export function DayChips({ days }: { days: string[] }) {
   );
 }
 
-const orderTone: Record<OrderStatus, Tone> = { Pending: "amber", Received: "blue", Posted: "green" };
+const orderTone: Record<OrderStatus, Tone> = { Pending: "amber", Received: "blue", Partial: "blue", Posted: "green" };
 const orderLabel: Record<OrderStatus, string> = {
   Pending: "Pending delivery",
   Received: "Received",
+  Partial: "Partly in stock",
   Posted: "Posted to stock",
 };
 
@@ -119,8 +120,9 @@ export function OrderStatusBadge({ status }: { status: OrderStatus }) {
   return <Badge tone={orderTone[status]}>{orderLabel[status]}</Badge>;
 }
 
-const lineTone: Record<LineStatus, Tone> = { Pending: "slate", Match: "green", Unmatch: "red" };
+const lineTone: Record<LineStatus, Tone> = { Pending: "slate", Match: "green", Unmatch: "red", Missing: "red", Extra: "blue" };
+const lineLabel: Record<LineStatus, string> = { Pending: "Pending", Match: "Match", Unmatch: "Unmatch", Missing: "Missing", Extra: "Not ordered" };
 
 export function LineStatusBadge({ status }: { status: LineStatus }) {
-  return <Badge tone={lineTone[status]}>{status}</Badge>;
+  return <Badge tone={lineTone[status]}>{lineLabel[status]}</Badge>;
 }
