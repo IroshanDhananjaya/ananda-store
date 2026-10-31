@@ -8,8 +8,9 @@ import { Field, Input, Textarea } from "@/components/ui/form";
 import { Modal } from "@/components/ui/modal";
 import { ReturnKindBadge } from "@/components/sales/return-items";
 import { EmptyRow, Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
-import { formatUnits, returnStock } from "@/lib/returns";
-import { useAppStore, useItemMap } from "@/lib/store";
+import Link from "next/link";
+import { formatUnits, returnStock, type SentFromBill } from "@/lib/returns";
+import { useAppStore, useItemMap, useShopMap } from "@/lib/store";
 import type { RaigamReturn } from "@/lib/types";
 import { formatDate, formatQty, todayISO } from "@/lib/utils";
 
@@ -22,10 +23,7 @@ function SendReturnsForm({ onDone }: { onDone: () => void }) {
   const itemMap = useItemMap();
   // Everything in Return Items, ready to send in full (change a qty to send part of it)
   const held = useMemo(
-    () =>
-      [...returnStock(sales, raigamReturns).values()]
-        .filter((r) => r.held > 0)
-        .sort((a, b) => a.sapCode.localeCompare(b.sapCode) || a.kind.localeCompare(b.kind)),
+    () => [...returnStock(sales, raigamReturns).values()].filter((r) => r.held > 0).sort((a, b) => a.sapCode.localeCompare(b.sapCode) || a.kind.localeCompare(b.kind)),
     [sales, raigamReturns],
   );
   const [qty, setQty] = useState<Record<string, string>>(() => Object.fromEntries(held.map((r) => [r.key, String(r.held)])));
@@ -174,8 +172,9 @@ export function SendReturnsDialog({ open, onClose }: { open: boolean; onClose: (
 }
 
 /** What went back to Raigam on one return note */
-export function ReturnNoteDialog({ note, onClose }: { note: RaigamReturn | null; onClose: () => void }) {
+export function ReturnNoteDialog({ note, onClose, fromBills = [] }: { note: RaigamReturn | null; onClose: () => void; fromBills?: SentFromBill[] }) {
   const itemMap = useItemMap();
+  const shopMap = useShopMap();
   const units = note?.lines.reduce((sum, l) => sum + l.qty, 0) ?? 0;
   return (
     <Modal
@@ -227,6 +226,47 @@ export function ReturnNoteDialog({ note, onClose }: { note: RaigamReturn | null;
               </TBody>
             </Table>
           </div>
+          {fromBills.length > 0 && (
+            <div>
+              <p className="mb-2 text-sm font-medium text-slate-700">From bills</p>
+              <div className="overflow-hidden rounded-lg border border-slate-200">
+                <Table>
+                  <THead>
+                    <tr>
+                      <TH>Bill No.</TH>
+                      <TH>Store</TH>
+                      <TH>Item</TH>
+                      <TH>Type</TH>
+                      <TH className="text-right">Qty</TH>
+                    </tr>
+                  </THead>
+                  <TBody>
+                    {fromBills.map((b) => {
+                      const ret = b.sale.returns.find((r) => r.id === b.returnId);
+                      return (
+                        <TR key={`${b.sale.id}|${b.returnId}`}>
+                          <TD>
+                            <Link href={`/sales/${b.sale.id}`} className="font-medium text-brand-700 hover:underline">
+                              {b.sale.saleNo}
+                            </Link>
+                            <span className="block text-xs text-slate-500">Delivered {formatDate(b.sale.deliveredDate)}</span>
+                          </TD>
+                          <TD className="whitespace-normal">{shopMap.get(b.sale.shopId)?.shopName ?? "—"}</TD>
+                          <TD className="whitespace-normal">
+                            <span className="block font-medium text-slate-900">{ret ? (itemMap.get(ret.sapCode)?.description ?? "Unknown item") : "—"}</span>
+                            <span className="block font-mono text-xs text-slate-500">{ret?.sapCode}</span>
+                          </TD>
+                          <TD>{ret && <ReturnKindBadge kind={ret.kind} />}</TD>
+                          <TD className="text-right font-semibold text-slate-900 tabular-nums">{formatQty(b.qty)}</TD>
+                        </TR>
+                      );
+                    })}
+                  </TBody>
+                </Table>
+              </div>
+              <p className="mt-2 text-xs text-slate-500">Return notes only record units per item, so they&apos;re matched to the oldest delivered bills first.</p>
+            </div>
+          )}
         </div>
       )}
     </Modal>

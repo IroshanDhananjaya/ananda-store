@@ -281,6 +281,48 @@ export const raigamReturnLines = pgTable(
   (t) => [primaryKey({ columns: [t.returnId, t.position] }), check("raigam_return_lines_qty", sql`${t.qty} > 0`), noApiAccess()],
 ).enableRLS();
 
+/** Free issue claimed back from Raigam for some delivered bills; its lines say what was claimed per bill and item */
+export const freeClaims = pgTable("free_claims", {
+  id: text().primaryKey(),
+  seq: seq(),
+  claimNo: text().notNull().unique(),
+  date: date({ mode: "string" }).notNull(),
+  /** Raigam's claim / reference no.; "" if none */
+  reference: text().notNull().default(""),
+  notes: text().notNull().default(""),
+  /** When Raigam paid it back; NULL = not paid yet */
+  paidDate: date({ mode: "string" }),
+  paidAmount: money().notNull().default(0),
+  paidReference: text().notNull().default(""),
+}, () => [noApiAccess()]).enableRLS();
+
+export const freeClaimLines = pgTable(
+  "free_claim_lines",
+  {
+    claimId: text()
+      .notNull()
+      .references(() => freeClaims.id, { onDelete: "cascade" }),
+    position: integer().notNull(),
+    // No cascade: a bill on a claim can't be deleted (checked in src/lib/free-issues.ts)
+    saleId: text()
+      .notNull()
+      .references(() => sales.id),
+    sapCode: text()
+      .notNull()
+      .references(() => items.sapCode),
+    qty: integer().notNull(),
+    /** Free issue value at the bill's price, when claimed */
+    value: money().notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.claimId, t.position] }),
+    // A bill's item is claimed once, on one claim
+    unique().on(t.saleId, t.sapCode),
+    check("free_claim_lines_qty", sql`${t.qty} > 0`),
+    noApiAccess(),
+  ],
+).enableRLS();
+
 /**
  * What a Raigam SFA id stands for here, learned by Sync from Raigam: Item → SAP code,
  * Store → shop id, Route → route id. No foreign key: a link to something deleted is just ignored.

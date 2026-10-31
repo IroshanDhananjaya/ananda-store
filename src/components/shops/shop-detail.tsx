@@ -12,6 +12,7 @@ import { BackLink, Card, CardHeader, Detail, NotFoundState, PageHeader, SummaryT
 import { EmptyRow, Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { PaymentFormDialog } from "@/components/payments/payment-form-dialog";
 import { openBills, saleTotal, shopLedger } from "@/lib/ledger";
+import { formatPct, returnRate, returnSplit } from "@/lib/returns";
 import { useAppStore, useRouteMap, useShopBalances } from "@/lib/store";
 import { useDialog } from "@/lib/use-dialog";
 import { cn, formatDate, formatMoney } from "@/lib/utils";
@@ -33,6 +34,8 @@ export function ShopDetail({ id }: { id: string }) {
   const ledger = useMemo(() => (shop ? shopLedger(shop, sales, payments) : []), [shop, sales, payments]);
   const bills = useMemo(() => (shop ? openBills(shop, sales, payments) : []), [shop, sales, payments]);
   const notDelivered = useMemo(() => sales.filter((s) => s.shopId === id && (s.status === "Ordered" || s.status === "Loaded")), [sales, id]);
+  // Returns against what the store bought (all its bills)
+  const rate = useMemo(() => returnRate(sales.filter((s) => s.shopId === id)), [sales, id]);
 
   if (!shop) return <NotFoundState title="Store not found" href="/stores" linkLabel="Back to stores" />;
 
@@ -78,7 +81,7 @@ export function ShopDetail({ id }: { id: string }) {
         }
       />
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
         <div className="rounded-xl border border-slate-200 bg-white px-5 py-4 shadow-sm">
           <p className="text-xs font-medium tracking-wide text-slate-500 uppercase">Cash balance</p>
           <p className={cn("mt-1.5 text-xl font-semibold tracking-tight tabular-nums", over ? "text-red-600" : "text-slate-900")}>
@@ -101,6 +104,7 @@ export function ShopDetail({ id }: { id: string }) {
           sub={b.overdueBills ? `${b.overdueBills} bill${b.overdueBills > 1 ? "s" : ""} past the end date` : `Credit days: ${shop.creditDays}`}
           tone={b.overdue > 0 ? "danger" : "default"}
         />
+        <SummaryTile label="Return %" value={formatPct(rate.pct, rate.sold)} sub={rate.sold > 0 ? `${returnSplit(rate)} · ${formatMoney(rate.returned)} returned` : "No sales yet"} />
       </div>
 
       <Card className="mt-6">

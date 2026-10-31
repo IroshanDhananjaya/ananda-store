@@ -1,6 +1,7 @@
 import type { StateCreator } from "zustand";
 import { billDiscount, linkUnlinkedPayments, missingSold, normalizeAllocations, payableBills, saleSubtotal, stockIsOut, unlinkedAmount } from "./ledger";
 import { isRaigamBill, NEW_STORE_CREDIT_DAYS, planRaigamSync, putLink, stockLocationFor, type ItemPicks, type RaigamBill } from "./raigam";
+import { billFreeIssue, claimBySale } from "./free-issues";
 import { returnKey, returnStock, sentMoreThanCollected } from "./returns";
 import {
   seedExpenses,
@@ -35,6 +36,9 @@ import {
   type RaigamLink,
   type RaigamReturn,
   type RaigamReturnInput,
+  type FreeClaim,
+  type FreeClaimInput,
+  type FreeClaimPaymentInput,
   type Result,
   type Route,
   type RouteInput,
@@ -79,6 +83,7 @@ export type Data = {
   expenses: Expense[];
   raigamReturns: RaigamReturn[];
   raigamLinks: RaigamLink[];
+  freeClaims: FreeClaim[];
 };
 
 export const DATA_KEYS = [
@@ -95,6 +100,7 @@ export const DATA_KEYS = [
   "expenses",
   "raigamReturns",
   "raigamLinks",
+  "freeClaims",
 ] as const satisfies readonly (keyof Data)[];
 
 export type Actions = {
@@ -196,6 +202,13 @@ export type Actions = {
   /** Delete a return note: its items are back in the return items store */
   deleteRaigamReturn: (id: string) => Result;
 
+  /** Claim the free issue on delivered bills back from Raigam (saved as a claim; the bills' free issue is then locked) */
+  createFreeClaim: (input: FreeClaimInput) => Result;
+  /** Raigam paid a claim back (paidDate "" = not paid after all) */
+  setFreeClaimPaid: (id: string, input: FreeClaimPaymentInput) => Result;
+  /** Delete a claim: its bills are not claimed again, and can be changed */
+  deleteFreeClaim: (id: string) => Result;
+
   /**
    * Sync from Raigam (src/lib/raigam.ts): adds new bills (and a store with just its name for a new outlet),
    * updates bills not delivered yet that changed on Raigam, and remembers the item matches picked.
@@ -264,6 +277,9 @@ export const ACTION_NAMES = [
   "deleteExpense",
   "sendReturnsToRaigam",
   "deleteRaigamReturn",
+  "createFreeClaim",
+  "setFreeClaimPaid",
+  "deleteFreeClaim",
   "syncRaigamBills",
   "resetDemoData",
 ] as const satisfies readonly ActionName[];
@@ -288,6 +304,7 @@ export const emptyData = (): Data => ({
   expenses: [],
   raigamReturns: [],
   raigamLinks: [],
+  freeClaims: [],
 });
 
 export const seedData = (): Data => ({
@@ -304,6 +321,7 @@ export const seedData = (): Data => ({
   expenses: seedExpenses,
   raigamReturns: [],
   raigamLinks: [],
+  freeClaims: [],
 });
 
 export const pickData = (s: Data): Data => Object.fromEntries(DATA_KEYS.map((k) => [k, s[k]])) as Data;
@@ -1803,6 +1821,57 @@ export const createCore =
       if (!get().raigamReturns.some((r) => r.id === id)) return fail("Return note not found.");
       // Its items are back in the return items store, waiting to be sent
       set((s) => ({ raigamReturns: s.raigamReturns.filter((r) => r.id !== id) }));
+      return ok();
+    },
+
+    // ---------- Free issue claimed back from Raigam ----------
+    createFreeClaim: (input) => {
+      const { sales, freeClaims } = get();
+      if (!input.date) return fail("Enter the date of the claim.");
+      const saleIds = [...new Set(Array.isArray(input.saleIds) ? input.saleIds : [])];
+      if (saleIds.length === 0) return fail("Tick the bills to claim.");
+      const claimed = claimBySale(freeClaims);
+      const lines: FreeClaim["lines"] = [];
+      for (const saleId of saleIds) {
+        const sale = sales.find((s) => s.id === saleId);
+        if (!sale) return fail("A ticked bill was not found. Close the window and try again.");
+        if (sale.status !== "Delivered") return fail(`Bill ${sale.saleNo} isn't delivered yet: only free issue given to the store can be claimed.`);
+        const on = claimed.get(saleId);
+        if (on) return fail(`Bill ${sale.saleNo} is already on claim ${on.claimNo}.`);
+        const free = billFreeIssue(sale);
+        if (free.length === 0) return fail(`Bill ${sale.saleNo} has no free issue to claim.`);
+        lines.push(...free.map((f) => ({ saleId, ...f })));
+      }
+      const claim: FreeClaim = {
+        id: newId(),
+        claimNo: nextCode(freeClaims.map((c) => c.claimNo), "FC", 4),
+        date: input.date,
+        reference: (input.reference ?? "").trim(),
+        notes: (input.notes ?? "").trim(),
+        paidDate: "",
+        paidAmount: 0,
+        paidReference: "",
+        lines,
+      };
+      set((s) => ({ freeClaims: [...s.freeClaims, claim] }));
+      return ok(claim.id);
+    },
+    setFreeClaimPaid: (id, input) => {
+      const claim = get().freeClaims.find((c) => c.id === id);
+      if (!claim) return fail("Claim not found.");
+      let paid: Pick<FreeClaim, "paidDate" | "paidAmount" | "paidReference">;
+      if (!input.paidDate) paid = { paidDate: "", paidAmount: 0, paidReference: "" };
+      else {
+        if (!Number.isFinite(input.paidAmount) || input.paidAmount < 0) return fail("Enter the amount Raigam paid.");
+        if (input.paidDate < claim.date) return fail(`The paid date can't be before the claim date (${claim.date}).`);
+        paid = { paidDate: input.paidDate, paidAmount: round2(input.paidAmount), paidReference: (input.paidReference ?? "").trim() };
+      }
+      set((s) => ({ freeClaims: s.freeClaims.map((c) => (c.id === id ? { ...c, ...paid } : c)) }));
+      return ok(id);
+    },
+    deleteFreeClaim: (id) => {
+      if (!get().freeClaims.some((c) => c.id === id)) return fail("Claim not found.");
+      set((s) => ({ freeClaims: s.freeClaims.filter((c) => c.id !== id) }));
       return ok();
     },
 

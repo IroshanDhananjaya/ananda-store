@@ -9,6 +9,7 @@ import {
   Landmark,
   LayoutDashboard,
   ListChecks,
+  ShieldCheck,
   LogOut,
   MapPin,
   Menu,
@@ -40,7 +41,13 @@ import { cn } from "@/lib/utils";
 type NavItem = { href: string; label: string; icon: LucideIcon; also?: string };
 
 const nav: { title: string | null; items: NavItem[] }[] = [
-  { title: null, items: [{ href: "/", label: "Dashboard", icon: LayoutDashboard }] },
+  {
+    title: null,
+    items: [
+      { href: "/", label: "Dashboard", icon: LayoutDashboard },
+      { href: "/checks", label: "Data Checks", icon: ShieldCheck },
+    ],
+  },
   {
     title: "Sales",
     items: [

@@ -1,9 +1,9 @@
 "use client";
 
-import { CircleCheck, CloudDownload, Eye, Pencil, Plus, Printer, Trash2, Truck } from "lucide-react";
+import { CircleCheck, CloudDownload, Eye, FileText, Pencil, Plus, Printer, Trash2, Truck, X } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { LoadLorryDialog } from "@/components/sales/load-lorry-dialog";
 import { BillStatusBadge, DueDateLabel } from "@/components/ui/badge";
@@ -23,7 +23,9 @@ import { BillStatusMenu } from "@/components/sales/bill-status-menu";
 import { BillFlags } from "@/components/sales/bill-flags";
 import { CheckedToggle } from "@/components/sales/checked-toggle";
 import { CashSheet } from "./cash-sheet";
+import { formatPct, returnRate, returnSplit } from "@/lib/returns";
 import { LoadingList } from "./loading-list";
+import { PrintedBills } from "./printed-bills";
 import { RaigamSyncDialog } from "./raigam-sync-dialog";
 
 /** Quick date tabs; "custom" is dates picked on the calendar that aren't one of them */
@@ -42,6 +44,8 @@ type Show = "all" | "toLoad" | "onLorry" | "due" | "overdue" | "paid" | "uncheck
 const SYNC_DAYS = 7;
 /** Bills per page (a normal day fits on one) */
 const PAGE_SIZE = 100;
+/** Columns in the invoices table (the day headings span them all) */
+const COLUMNS = 11;
 
 const KIND_LABELS: Record<Kind, string> = { all: "All", booking: "Booking", actual: "Actual", late: "Late delivery", cancelled: "Cancelled" };
 
@@ -167,6 +171,22 @@ function InvoicesPage({
   const [syncing, setSyncing] = useState(false);
   const [checkingAll, setCheckingAll] = useState(false);
   const remove = useDialog<Sale>();
+  /** Bills ticked to print (Print bills), kept while the filters change */
+  const [ticked, setTicked] = useState<Set<string>>(new Set());
+  /** What the next print is: the cash sheet (default), or the ticked bills one per page */
+  const [printing, setPrinting] = useState<"sheet" | "bills">("sheet");
+
+  // Print bills: once the ticked bills are on the page, open the print window ("Save as PDF" there makes the PDF)
+  useEffect(() => {
+    if (printing !== "bills") return;
+    const done = () => setPrinting("sheet");
+    window.addEventListener("afterprint", done, { once: true });
+    const timer = window.setTimeout(() => window.print(), 50);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("afterprint", done);
+    };
+  }, [printing]);
 
   const { from, to } = range;
 
@@ -212,6 +232,18 @@ function InvoicesPage({
     .sort((a, b) => dateOf(b).localeCompare(dateOf(a)) || a.saleNo.localeCompare(b.saleNo));
 
   const byDay = Map.groupBy(rows, dateOf);
+  // Ticked bills in view, in the list's order (oldest day first, like the cash sheet)
+  const chosen = [...rows].filter((s) => ticked.has(s.id)).sort((a, b) => dateOf(a).localeCompare(dateOf(b)) || a.saleNo.localeCompare(b.saleNo));
+  const allTicked = rows.length > 0 && chosen.length === rows.length;
+  const tick = (ids: string[], on: boolean) =>
+    setTicked((prev) => {
+      const next = new Set(prev);
+      for (const id of ids) {
+        if (on) next.add(id);
+        else next.delete(id);
+      }
+      return next;
+    });
   const pager = usePagination(rows, [preset, from, to, dateBy, routeId, shopId, kind, show, query], PAGE_SIZE);
   // The page's bills by day; a day's totals cover all its bills, also those on another page
   const pageDays = [...Map.groupBy(pager.pageRows, dateOf)];
@@ -227,6 +259,7 @@ function InvoicesPage({
   const total = sum(rows, (s) => due(s).total);
   const paid = sum(rows, (s) => due(s).paid);
   const balance = sum(rows, (s) => due(s).due);
+  const rate = returnRate(rows);
   const notDelivered = live.filter((s) => !due(s).delivered);
   const overdue = live.filter((s) => due(s).overdueDays > 0);
   // Raigam bills in view not ticked yet
@@ -264,6 +297,16 @@ function InvoicesPage({
               <Button variant="outline" onClick={() => window.print()}>
                 <Printer /> {view === "invoices" ? "Print cash sheet" : "Print"}
               </Button>
+              {view === "invoices" && (
+                <Button
+                  variant="outline"
+                  onClick={() => setPrinting("bills")}
+                  disabled={chosen.length === 0}
+                  title={chosen.length ? "Print the ticked bills, one per page (choose Save as PDF in the print window for a PDF)" : "Tick bills in the list to print them"}
+                >
+                  <FileText /> Print bills{chosen.length > 0 && ` (${chosen.length})`}
+                </Button>
+              )}
               <Button variant="outline" onClick={() => setLoading(true)}>
                 <Truck /> Load lorry{toLoad.length > 0 && ` (${toLoad.length})`}
               </Button>
@@ -274,7 +317,7 @@ function InvoicesPage({
           }
         />
 
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
           {/* Same figures as Raigam's invoice page, for the tab picked below */}
           <SummaryTile
             label="Invoice count"
@@ -299,6 +342,7 @@ function InvoicesPage({
             }
             tone={overdue.length ? "danger" : "default"}
           />
+          <SummaryTile label="Return %" value={formatPct(rate.pct, rate.sold)} sub={`${returnSplit(rate)} · ${formatMoney(rate.returned)} returned`} />
         </div>
 
         <div className="mt-6 print:hidden">
@@ -376,6 +420,14 @@ function InvoicesPage({
                   <option value="checked">{SHOW_LABELS.checked}</option>
                 </optgroup>
               </Select>
+              {view === "invoices" && chosen.length > 0 && (
+                <span className="flex items-center gap-1 text-sm text-slate-600">
+                  {plural(chosen.length, "bill")} ticked
+                  <Button variant="ghost" size="sm" onClick={() => setTicked(new Set())} title="Untick all">
+                    <X /> Clear
+                  </Button>
+                </span>
+              )}
               {view === "invoices" && show === "unchecked" && toCheck.length > 0 && (
                 <Button variant="secondary" size="sm" onClick={() => setCheckingAll(true)}>
                   <CircleCheck /> Mark {plural(toCheck.length, "bill")} checked
@@ -402,6 +454,20 @@ function InvoicesPage({
               <Table>
                 <THead>
                   <tr>
+                    <TH className="w-10 print:hidden">
+                      <input
+                        type="checkbox"
+                        className="size-4 cursor-pointer rounded accent-brand-600"
+                        checked={allTicked}
+                        ref={(el) => {
+                          if (el) el.indeterminate = chosen.length > 0 && !allTicked;
+                        }}
+                        onChange={() => tick(rows.map((s) => s.id), !allTicked)}
+                        disabled={rows.length === 0}
+                        aria-label={`Tick all ${rows.length} bills to print`}
+                        title="Tick all bills in the list (every page)"
+                      />
+                    </TH>
                     <TH>Bill No.</TH>
                     <TH>Store</TH>
                     <TH>Items</TH>
@@ -420,7 +486,7 @@ function InvoicesPage({
                 </THead>
                 <TBody>
                   {rows.length === 0 && (
-                    <EmptyRow colSpan={10}>
+                    <EmptyRow colSpan={COLUMNS}>
                       No {kind === "all" ? "" : `${KIND_LABELS[kind].toLowerCase()} `}invoices{preset === "all" ? "" : " for these dates"}
                       {dateBy === "delivered" ? " (only delivered bills have a delivered date)" : ""}.
                     </EmptyRow>
@@ -438,6 +504,15 @@ function InvoicesPage({
                             className={cn("cursor-pointer", d.overdueDays > 0 && "bg-red-50/40", s.status === "Cancelled" && "bg-slate-50/70 opacity-70")}
                             onClick={() => router.push(`/sales/${s.id}`)}
                           >
+                            <TD className="print:hidden" onClick={(e) => e.stopPropagation()}>
+                              <input
+                                type="checkbox"
+                                className="size-4 cursor-pointer rounded accent-brand-600"
+                                checked={ticked.has(s.id)}
+                                onChange={(e) => tick([s.id], e.target.checked)}
+                                aria-label={`Tick ${s.saleNo} to print`}
+                              />
+                            </TD>
                             <TD>
                               <span className="block font-semibold text-brand-700">{s.saleNo}</span>
                               {s.invoiceNo && <span className="block font-mono text-xs text-slate-600">{s.invoiceNo}</span>}
@@ -457,7 +532,10 @@ function InvoicesPage({
                               <span className="block text-xs text-slate-500">{plural(units(s), "unit")}</span>
                               <BillFlags sale={s} itemMap={itemMap} />
                             </TD>
-                            <TD className="text-right tabular-nums">{formatMoney(d.total)}</TD>
+                            <TD className="text-right tabular-nums">
+                              {formatMoney(d.total)}
+                              {s.returns.length > 0 && <span className="block text-xs text-red-600">Returns {formatPct(returnRate([s]).pct, returnRate([s]).sold)}</span>}
+                            </TD>
                             <TD className="text-right text-emerald-700 tabular-nums">{d.paid ? formatMoney(d.paid) : "—"}</TD>
                             <TD className={cn("text-right font-semibold tabular-nums", d.due > 0 ? "text-slate-900" : "text-slate-400")}>
                               {d.delivered ? formatMoney(d.due) : "—"}
@@ -517,9 +595,12 @@ function InvoicesPage({
         </Card>
       </div>
 
-      {view === "invoices" && (
-        <CashSheet sales={live} dateOf={dateOf} period={period} route={route} storeName={shop?.shopName} />
-      )}
+      {view === "invoices" &&
+        (printing === "bills" ? (
+          <PrintedBills sales={chosen} />
+        ) : (
+          <CashSheet sales={live} dateOf={dateOf} period={period} route={route} storeName={shop?.shopName} />
+        ))}
 
       <LoadLorryDialog open={loading} onClose={() => setLoading(false)} preselect={preselect} />
       {/* At least the last week, so new bills and changes to recent ones come in even when the page shows only today */}
@@ -589,7 +670,7 @@ function DayGroup({
   return (
     <>
       <tr className="bg-slate-100/80">
-        <td colSpan={10} className="px-5 py-2">
+        <td colSpan={COLUMNS} className="px-5 py-2">
           <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1">
             <span className="text-sm font-semibold text-slate-900">{dayLabel(day)}</span>
             <span className="text-xs text-slate-600 tabular-nums">

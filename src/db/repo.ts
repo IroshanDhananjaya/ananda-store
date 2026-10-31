@@ -2,6 +2,7 @@ import { asc, eq, getTableColumns, inArray, sql, type Column, type Table } from 
 import type { PgTable } from "drizzle-orm/pg-core";
 import { createStore } from "zustand/vanilla";
 import { createCore, emptyData, pickData, type ActionName, type AppStore, type Data } from "@/lib/core";
+import { claimConflict } from "@/lib/free-issues";
 import { OPENING_BILL, type ExpenseCategory, type Order, type OrderItem, type Payment, type Result, type ReturnKind, type Sale, type WeekDay } from "@/lib/types";
 import type { Db } from "./connect";
 import * as t from "./schema";
@@ -39,7 +40,7 @@ function columns<T extends Table>(table: T) {
 // ---------- Loading ----------
 
 export async function loadData(tx: Tx): Promise<Data> {
-  const [items, locations, stock, orders, orderInvoices, orderItems, routes, shops, sales, lines, payments, allocations, expenses, raigamReturns, raigamReturnLines, raigamLinks] = await Promise.all([
+  const [items, locations, stock, orders, orderInvoices, orderItems, routes, shops, sales, lines, payments, allocations, expenses, raigamReturns, raigamReturnLines, raigamLinks, freeClaims, freeClaimLines] = await Promise.all([
     tx.select(columns(t.items)).from(t.items).orderBy(asc(t.items.seq)),
     tx.select(columns(t.locations)).from(t.locations).orderBy(asc(t.locations.seq)),
     tx.select(columns(t.stock)).from(t.stock).orderBy(asc(t.stock.seq)),
@@ -56,11 +57,14 @@ export async function loadData(tx: Tx): Promise<Data> {
     tx.select(columns(t.raigamReturns)).from(t.raigamReturns).orderBy(asc(t.raigamReturns.seq)),
     tx.select().from(t.raigamReturnLines).orderBy(asc(t.raigamReturnLines.returnId), asc(t.raigamReturnLines.position)),
     tx.select(columns(t.raigamLinks)).from(t.raigamLinks).orderBy(asc(t.raigamLinks.seq)),
+    tx.select(columns(t.freeClaims)).from(t.freeClaims).orderBy(asc(t.freeClaims.seq)),
+    tx.select().from(t.freeClaimLines).orderBy(asc(t.freeClaimLines.claimId), asc(t.freeClaimLines.position)),
   ]);
 
   const linesBySale = Map.groupBy(lines, (l) => l.saleId);
   const allocationsByPayment = Map.groupBy(allocations, (a) => a.paymentId);
   const linesByReturn = Map.groupBy(raigamReturnLines, (l) => l.returnId);
+  const linesByClaim = Map.groupBy(freeClaimLines, (l) => l.claimId);
 
   return {
     items,
@@ -131,6 +135,11 @@ export async function loadData(tx: Tx): Promise<Data> {
       lines: (linesByReturn.get(r.id) ?? []).map((l) => ({ kind: l.kind, sapCode: l.sapCode, qty: l.qty })),
     })),
     raigamLinks,
+    freeClaims: freeClaims.map((r) => ({
+      ...r,
+      paidDate: unblank(r.paidDate),
+      lines: (linesByClaim.get(r.id) ?? []).map((l) => ({ saleId: l.saleId, sapCode: l.sapCode, qty: l.qty, value: l.value })),
+    })),
   };
 }
 
@@ -216,6 +225,12 @@ const SPECS: TableSpec[] = [
     rows: (r) => r.lines.map((l, position) => ({ ...l, returnId: r.id, position })),
   }),
   spec("raigamLinks", t.raigamLinks, (r) => ({ ...r })),
+  // After sales: its lines point at bills
+  spec("freeClaims", t.freeClaims, (r) => ({ ...omit(r, "lines"), paidDate: blank(r.paidDate) }), {
+    table: t.freeClaimLines,
+    parent: t.freeClaimLines.claimId,
+    rows: (r) => r.lines.map((l, position) => ({ ...l, claimId: r.id, position })),
+  }),
 ];
 
 const fingerprint = (s: TableSpec, r: Rec) => JSON.stringify([s.toRow(r), s.children?.rows(r)]);
@@ -281,7 +296,11 @@ export function applyAction(db: Db, name: ActionName, args: unknown[], today: st
     const action = store.getState()[name] as (...a: unknown[]) => Result;
     const result = action(...args);
     if (!result.ok) return { result, changes: {} };
-    const changes = await saveChanges(tx, before, pickData(store.getState()));
+    const after = pickData(store.getState());
+    // Bills on a free issue claim keep the free issue claimed (unless they already didn't match before this change)
+    const conflict = claimConflict(after.sales, after.freeClaims);
+    if (conflict && conflict !== claimConflict(before.sales, before.freeClaims)) return { result: { ok: false, error: conflict }, changes: {} };
+    const changes = await saveChanges(tx, before, after);
     return { result, changes };
   });
 }

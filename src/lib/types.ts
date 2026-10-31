@@ -228,6 +228,31 @@ export type RaigamReturn = {
 export type RaigamReturnLine = { kind: ReturnKind; sapCode: string; qty: number };
 
 /**
+ * Free issue claimed back from Raigam for some delivered bills (a claim, e.g. "FC - 0001"). Its lines keep what was
+ * claimed per bill and item; while a bill is on a claim its free issue can't change (src/lib/free-issues.ts).
+ */
+export type FreeClaim = {
+  id: string;
+  /** e.g. "FC - 0001" */
+  claimNo: string;
+  /** ISO date claimed */
+  date: string;
+  /** Raigam's claim / reference no.; "" if none */
+  reference: string;
+  notes: string;
+  /** ISO date Raigam paid it back; "" = not paid yet */
+  paidDate: string;
+  /** What Raigam paid (may differ from the claim value) */
+  paidAmount: number;
+  /** Raigam's credit note / payment reference; "" if none */
+  paidReference: string;
+  lines: FreeClaimLine[];
+};
+
+/** Free issue of one item on one bill, as claimed: units and value at the bill's price */
+export type FreeClaimLine = { saleId: string; sapCode: string; qty: number; value: number };
+
+/**
  * Ordered = bill created by the rep (no stock moved)
  * Loaded = items loaded on the lorry (stock deducted)
  * Delivered = items given to the store (the store now owes the bill)
@@ -408,6 +433,10 @@ export type BillItemInput = Pick<SaleLine, "sapCode" | "qty" | "freeQty" | "unit
 };
 export type SaleReturnInput = Omit<SaleReturn, "id" | "costPrice">;
 export type RaigamReturnInput = Omit<RaigamReturn, "id" | "returnNo">;
+/** A new claim: the delivered bills whose free issue is claimed (all of it, worked out on the server) */
+export type FreeClaimInput = Pick<FreeClaim, "date" | "reference" | "notes"> & { saleIds: string[] };
+/** Raigam paid a claim back; paidDate "" = not paid (clears it) */
+export type FreeClaimPaymentInput = Pick<FreeClaim, "paidDate" | "paidAmount" | "paidReference">;
 export type ExpenseInput = Omit<Expense, "id" | "expenseNo">;
 export type SaleInput = Omit<
   Sale,

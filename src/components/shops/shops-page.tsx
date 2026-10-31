@@ -3,7 +3,7 @@
 import { Eye, MapPin, Pencil, Plus, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { ActiveBadge, Badge } from "@/components/ui/badge";
 import { Button, buttonClass } from "@/components/ui/button";
@@ -13,6 +13,7 @@ import { Card, FilterTabs, PageHeader, SearchInput, TableFooter, Toolbar } from 
 import { Pagination, usePagination } from "@/components/ui/pagination";
 import { EmptyRow, RowActions, Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { useAppStore, useRouteMap, useShopBalances } from "@/lib/store";
+import { formatPct, returnRate, returnSplit, type ReturnRate } from "@/lib/returns";
 import type { Shop } from "@/lib/types";
 import { useDialog } from "@/lib/use-dialog";
 import { cn, formatMoney, includesText } from "@/lib/utils";
@@ -24,6 +25,7 @@ export function ShopsPage() {
   const router = useRouter();
   const shops = useAppStore((s) => s.shops);
   const routes = useAppStore((s) => s.routes);
+  const sales = useAppStore((s) => s.sales);
   const deleteShop = useAppStore((s) => s.deleteShop);
   const routeMap = useRouteMap();
   const balances = useShopBalances();
@@ -34,6 +36,12 @@ export function ShopsPage() {
   const remove = useDialog<Shop>();
 
   const balanceOf = (s: Shop) => balances.get(s.id)?.balance ?? 0;
+  // Each store's returns against what it bought (all its bills)
+  const rates = useMemo(() => {
+    const map = new Map<string, ReturnRate>();
+    for (const [shopId, list] of Map.groupBy(sales, (s) => s.shopId)) map.set(shopId, returnRate(list));
+    return map;
+  }, [sales]);
   const matches: Record<Filter, (s: Shop) => boolean> = {
     all: () => true,
     owing: (s) => balanceOf(s) > 0,
@@ -96,6 +104,9 @@ export function ShopsPage() {
               <TH>Route</TH>
               <TH className="text-right">Credit Limit</TH>
               <TH className="text-right">Cash Balance</TH>
+              <TH className="text-right" title="Value of returns ÷ value of items sold to the store">
+                Return %
+              </TH>
               <TH>Status</TH>
               <TH className="w-28">
                 <span className="sr-only">Actions</span>
@@ -103,7 +114,7 @@ export function ShopsPage() {
             </tr>
           </THead>
           <TBody>
-            {rows.length === 0 && <EmptyRow colSpan={9}>No stores found.</EmptyRow>}
+            {rows.length === 0 && <EmptyRow colSpan={10}>No stores found.</EmptyRow>}
             {pager.pageRows.map((s) => {
               const balance = balanceOf(s);
               const over = balance > s.creditLimit;
@@ -144,6 +155,18 @@ export function ShopsPage() {
                     {(balances.get(s.id)?.overdue ?? 0) > 0 && (
                       <span className="block text-xs font-medium text-red-600">{formatMoney(balances.get(s.id)!.overdue)} overdue</span>
                     )}
+                  </TD>
+                  <TD className="text-right tabular-nums">
+                    {(() => {
+                      const r = rates.get(s.id);
+                      if (!r || r.sold <= 0) return <span className="text-slate-400">—</span>;
+                      return (
+                        <>
+                          <span className={cn(r.pct > 0 ? "font-medium text-slate-900" : "text-slate-500")}>{formatPct(r.pct)}</span>
+                          {r.returned > 0 && <span className="block text-xs text-slate-500">{returnSplit(r)}</span>}
+                        </>
+                      );
+                    })()}
                   </TD>
                   <TD>
                     <ActiveBadge active={s.active} />
