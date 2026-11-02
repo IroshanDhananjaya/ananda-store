@@ -1,7 +1,7 @@
 "use client";
 
-import { AlertTriangle, CloudDownload, Loader2, Store } from "lucide-react";
-import { useMemo, useState, type ComponentProps, type FormEvent } from "react";
+import { AlertTriangle, ArrowRight, ChevronDown, CloudDownload, Loader2, Store } from "lucide-react";
+import { Fragment, useMemo, useState, type ComponentProps, type FormEvent, type ReactNode } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -18,7 +18,9 @@ import {
   planRaigamSync,
   RAIGAM_ITEMS_BATCH,
   suggestItem,
+  type BillChanges,
   type ItemPicks,
+  type LineFigures,
   type RaigamBill,
   type RaigamLine,
   type SyncAction,
@@ -467,10 +469,36 @@ function rowBadge(r: SyncRow): { tone: Tone; label: string } {
 
 function BillRows({ rows, plan, data }: { rows: SyncRow[]; plan: SyncPlan; data: SyncData }) {
   const shopName = useMemo(() => new Map(data.shops.map((s) => [s.id, s.shopName])), [data.shops]);
+  const itemName = useMemo(() => new Map(data.items.map((i) => [i.sapCode, i.description])), [data.items]);
+  /** Bills whose changes are shown */
+  const [open, setOpen] = useState<Set<number>>(new Set());
   if (rows.length === 0) return <p className="rounded-lg border border-slate-200 px-3 py-8 text-center text-sm text-slate-500">No bills here.</p>;
+  const withChanges = rows.slice(0, MAX_ROWS).filter((r) => r.changes);
+  const allOpen = withChanges.length > 0 && withChanges.every((r) => open.has(r.bill.id));
+  const toggle = (id: number) =>
+    setOpen((s) => {
+      const next = new Set(s);
+      if (!next.delete(id)) next.add(id);
+      return next;
+    });
+  const storeName = (shopId: string, outletId: number) => {
+    const ref = plan.stores.get(outletId);
+    return shopName.get(shopId) || (ref && "name" in ref ? `${ref.name} (new store)` : shopId);
+  };
 
   return (
     <div className="overflow-hidden rounded-lg border border-slate-200">
+      {withChanges.length > 0 && (
+        <div className="flex justify-end border-b border-slate-200 bg-slate-50 px-3 py-1.5">
+          <button
+            type="button"
+            onClick={() => setOpen(allOpen ? new Set() : new Set(withChanges.map((r) => r.bill.id)))}
+            className="text-xs font-medium text-brand-700 hover:underline"
+          >
+            {allOpen ? "Hide all changes" : `Show changes on all ${plural(withChanges.length, "bill")}`}
+          </button>
+        </div>
+      )}
       <StackBox>
         <table className="w-full text-sm">
           <thead className="bg-slate-50 text-left text-xs font-semibold tracking-wide text-slate-500 uppercase">
@@ -486,7 +514,8 @@ function BillRows({ rows, plan, data }: { rows: SyncRow[]; plan: SyncPlan; data:
               const ref = plan.stores.get(r.bill.outletId);
               const badge = rowBadge(r);
               return (
-                <tr key={r.bill.id} className="align-top">
+                <Fragment key={r.bill.id}>
+                <tr className="align-top">
                   <td className="px-3 py-2">
                     <span className="font-mono text-xs font-semibold text-slate-900">{r.bill.invoiceNo}</span>
                     <span className="block text-xs text-slate-500">
@@ -514,8 +543,27 @@ function BillRows({ rows, plan, data }: { rows: SyncRow[]; plan: SyncPlan; data:
                   <td className="px-3 py-2 whitespace-normal">
                     <Badge tone={badge.tone}>{badge.label}</Badge>
                     <span className="mt-0.5 block text-xs text-slate-500">{r.note}</span>
+                    {r.changes && (
+                      <button
+                        type="button"
+                        onClick={() => toggle(r.bill.id)}
+                        aria-expanded={open.has(r.bill.id)}
+                        className="mt-1 inline-flex items-center gap-0.5 text-xs font-medium text-brand-700 hover:underline"
+                      >
+                        <ChevronDown className={cn("size-3.5 transition-transform", open.has(r.bill.id) && "rotate-180")} />
+                        {open.has(r.bill.id) ? "Hide changes" : "See changes"}
+                      </button>
+                    )}
                   </td>
                 </tr>
+                {r.changes && open.has(r.bill.id) && (
+                  <tr>
+                    <td colSpan={4} className="bg-slate-50/70 px-3 py-2">
+                      <ChangeDetails changes={r.changes} itemName={itemName} storeName={(id) => storeName(id, r.bill.outletId)} />
+                    </td>
+                  </tr>
+                )}
+                </Fragment>
               );
             })}
           </tbody>
@@ -526,6 +574,113 @@ function BillRows({ rows, plan, data }: { rows: SyncRow[]; plan: SyncPlan; data:
           Showing the first {formatQty(MAX_ROWS)} of {formatQty(rows.length)}.
         </p>
       )}
+    </div>
+  );
+}
+
+const FIELD_LABEL: Record<BillChanges["fields"][number]["field"], string> = {
+  invoiceNo: "Invoice no.",
+  store: "Store",
+  date: "Date",
+  discount: "Bill discount",
+};
+
+/** An item line's figures in a few words: "12 × Rs. 120.00 · 2 free · 5% off · 3 taken off" */
+function lineText(f: LineFigures) {
+  return [
+    `${formatQty(f.qty)} × ${formatMoney(f.unitPrice)}`,
+    f.freeQty > 0 && `${formatQty(f.freeQty)} free`,
+    f.discountPct > 0 && `${f.discountPct}% off`,
+    f.takenOff > 0 && `${formatQty(f.takenOff)} taken off`,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+function BeforeAfter({ before, after }: { before?: ReactNode; after?: ReactNode }) {
+  return (
+    <span className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 tabular-nums">
+      {before !== undefined ? <span className="text-red-700 line-through decoration-red-300">{before}</span> : <Badge tone="green">Added</Badge>}
+      <ArrowRight className="size-3 shrink-0 text-slate-400" />
+      {after !== undefined ? <span className="font-medium text-emerald-700">{after}</span> : <Badge tone="red">Removed</Badge>}
+    </span>
+  );
+}
+
+/** What saving Raigam's version does to the bill here: each field, item and return item, before → after */
+function ChangeDetails({
+  changes,
+  itemName,
+  storeName,
+}: {
+  changes: BillChanges;
+  itemName: Map<string, string>;
+  storeName: (shopId: string) => string;
+}) {
+  const fieldValue = (field: BillChanges["fields"][number]["field"], v: string | number) =>
+    field === "store" ? storeName(String(v)) : field === "date" ? formatDate(String(v)) : field === "discount" ? `${v}%` : String(v);
+  const rows: { key: string; what: ReactNode; change: ReactNode }[] = [
+    ...changes.fields.map((f) => ({
+      key: `f-${f.field}`,
+      what: FIELD_LABEL[f.field],
+      change: <BeforeAfter before={fieldValue(f.field, f.before)} after={fieldValue(f.field, f.after)} />,
+    })),
+    ...changes.lines.map((l) => ({
+      key: `l-${l.sapCode}`,
+      what: (
+        <>
+          {itemName.get(l.sapCode) ?? l.sapCode}
+          <span className="block text-[11px] text-slate-500">{l.sapCode}</span>
+        </>
+      ),
+      change: <BeforeAfter before={l.before && lineText(l.before)} after={l.after && lineText(l.after)} />,
+    })),
+    ...changes.returns.map((r) => ({
+      key: `r-${r.kind}-${r.sapCode}`,
+      what: (
+        <>
+          {itemName.get(r.sapCode) ?? r.sapCode}
+          <span className="block text-[11px] text-slate-500">
+            {r.kind} return · {r.sapCode}
+          </span>
+        </>
+      ),
+      change: (
+        <BeforeAfter
+          before={r.before && `${formatQty(r.before.qty)} × ${formatMoney(r.before.unitPrice)}`}
+          after={r.after && `${formatQty(r.after.qty)} × ${formatMoney(r.after.unitPrice)}`}
+        />
+      ),
+    })),
+  ];
+  const totalMoves = Math.abs(changes.totalAfter - changes.totalBefore) > 0.005;
+
+  return (
+    <div className="flex flex-col gap-1.5 text-xs">
+      <table className="w-full">
+        <thead className="text-left text-[11px] font-semibold tracking-wide text-slate-500 uppercase">
+          <tr>
+            <th className="w-2/5 py-1 pr-3">What changes</th>
+            <th className="py-1">Here now → from Raigam</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-200/70">
+          {rows.map((r) => (
+            <tr key={r.key} className="align-top">
+              <td className="py-1.5 pr-3 text-slate-800">{r.what}</td>
+              <td className="py-1.5">{r.change}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <p className="flex flex-wrap items-center gap-1.5 border-t border-slate-200 pt-1.5 text-slate-600">
+        Bill total
+        {totalMoves ? (
+          <BeforeAfter before={formatMoney(changes.totalBefore)} after={formatMoney(changes.totalAfter)} />
+        ) : (
+          <span className="tabular-nums">{formatMoney(changes.totalAfter)} (no change)</span>
+        )}
+      </p>
     </div>
   );
 }

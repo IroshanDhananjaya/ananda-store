@@ -1,4 +1,4 @@
-import { billDiscount, saleSubtotal } from "./ledger";
+import { billDiscount, saleSubtotal, saleTotal } from "./ledger";
 import type {
   Item,
   RaigamLink,
@@ -260,6 +260,21 @@ export type SyncRow = {
   late?: boolean;
   /** Our total for the bill, when it isn't Raigam's */
   differentTotal?: number;
+  /** update: exactly what changes on the bill here, before and after */
+  changes?: BillChanges;
+};
+
+/** An item line's figures on the bill */
+export type LineFigures = Pick<SaleLineInput, "qty" | "freeQty" | "takenOff" | "unitPrice" | "discountPct">;
+type ReturnFigures = Pick<SaleReturnInput, "qty" | "unitPrice">;
+/** Each bill field, item and return item that changes (before left out = added; after left out = removed) */
+export type BillChanges = {
+  fields: { field: "invoiceNo" | "store" | "date" | "discount"; before: string | number; after: string | number }[];
+  lines: { sapCode: string; before?: LineFigures; after?: LineFigures }[];
+  returns: { kind: SaleReturnInput["kind"]; sapCode: string; before?: ReturnFigures; after?: ReturnFigures }[];
+  /** The bill's total here now, and once Raigam's version is saved */
+  totalBefore: number;
+  totalAfter: number;
 };
 
 export type SyncPlan = {
@@ -284,6 +299,73 @@ function differences(sale: Sale, input: SaleInput) {
   if (!sameList(sale.returns.map(returnSig), input.returns.map(returnSig))) changes.push("return items");
   if (round2(sale.discountPercent) !== round2(input.discountPercent)) changes.push("discount");
   return changes;
+}
+
+/** Item lines by SAP code, a code on more than one line added together */
+function linesByCode(lines: (LineFigures & { sapCode: string })[]) {
+  const map = new Map<string, LineFigures>();
+  for (const l of lines) {
+    const had = map.get(l.sapCode);
+    const f = { qty: l.qty, freeQty: l.freeQty, takenOff: l.takenOff, unitPrice: l.unitPrice, discountPct: l.discountPct };
+    map.set(l.sapCode, had ? { ...had, qty: had.qty + f.qty, freeQty: had.freeQty + f.freeQty, takenOff: had.takenOff + f.takenOff } : f);
+  }
+  return map;
+}
+
+/** Return items by kind and SAP code, added together */
+function returnsByKey(returns: SaleReturnInput[]) {
+  const map = new Map<string, SaleReturnInput>();
+  for (const r of returns) {
+    const key = `${r.kind}|${r.sapCode}`;
+    const had = map.get(key);
+    map.set(key, had ? { ...had, qty: had.qty + r.qty } : { kind: r.kind, sapCode: r.sapCode, qty: r.qty, unitPrice: r.unitPrice });
+  }
+  return map;
+}
+
+const sameLine = (a: LineFigures, b: LineFigures) =>
+  a.qty === b.qty &&
+  a.freeQty === b.freeQty &&
+  a.takenOff === b.takenOff &&
+  round2(a.unitPrice) === round2(b.unitPrice) &&
+  round2(a.discountPct) === round2(b.discountPct);
+
+/** Each field, item and return item that changes when Raigam's version is saved over the bill here */
+function detailChanges(sale: Sale, input: SaleInput): BillChanges {
+  const fields: BillChanges["fields"] = [];
+  if (sale.invoiceNo !== input.invoiceNo) fields.push({ field: "invoiceNo", before: sale.invoiceNo, after: input.invoiceNo });
+  if (sale.shopId !== input.shopId) fields.push({ field: "store", before: sale.shopId, after: input.shopId });
+  if (sale.date !== input.date) fields.push({ field: "date", before: sale.date, after: input.date });
+  if (round2(sale.discountPercent) !== round2(input.discountPercent))
+    fields.push({ field: "discount", before: sale.discountPercent, after: input.discountPercent });
+
+  const linesWas = linesByCode(sale.lines);
+  const linesNow = linesByCode(input.lines);
+  const lines: BillChanges["lines"] = [];
+  for (const sapCode of new Set([...linesWas.keys(), ...linesNow.keys()])) {
+    const before = linesWas.get(sapCode);
+    const after = linesNow.get(sapCode);
+    if (!(before && after && sameLine(before, after))) lines.push({ sapCode, before, after });
+  }
+
+  const returnsWas = returnsByKey(sale.returns);
+  const returnsNow = returnsByKey(input.returns);
+  const returns: BillChanges["returns"] = [];
+  for (const key of new Set([...returnsWas.keys(), ...returnsNow.keys()])) {
+    const before = returnsWas.get(key);
+    const after = returnsNow.get(key);
+    if (before && after && before.qty === after.qty && round2(before.unitPrice) === round2(after.unitPrice)) continue;
+    const { kind, sapCode } = (before ?? after)!;
+    returns.push({
+      kind,
+      sapCode,
+      before: before && { qty: before.qty, unitPrice: before.unitPrice },
+      after: after && { qty: after.qty, unitPrice: after.unitPrice },
+    });
+  }
+
+  const subtotal = saleSubtotal(input);
+  return { fields, lines, returns, totalBefore: saleTotal(sale), totalAfter: round2(subtotal - billDiscount(subtotal, input.discountPercent)) };
 }
 
 /** The bill as Raigam has it, in the app's terms; a string says why it can't be */
@@ -409,6 +491,7 @@ export function planRaigamSync(data: SyncData, bills: RaigamBill[], picks: ItemP
       input: changes.length ? input : undefined,
       late,
       differentTotal,
+      changes: changes.length ? detailChanges(sale, input) : undefined,
       note: `Changed on Raigam: ${[...changes, ...(late ? ["late delivery"] : [])].join(", ")}${
         changes.length && sale.checked ? ". Its Checked tick is cleared: check it again" : ""
       }`,
