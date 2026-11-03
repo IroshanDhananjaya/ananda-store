@@ -9,10 +9,10 @@ import { Modal } from "@/components/ui/modal";
 import { ReturnKindBadge } from "@/components/sales/return-items";
 import { EmptyRow, Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import Link from "next/link";
-import { formatUnits, returnStock, type SentFromBill } from "@/lib/returns";
+import { avgPrice, formatUnits, returnStock, sentLineValue, sentValue, type SentFromBill } from "@/lib/returns";
 import { useAppStore, useItemMap, useShopMap } from "@/lib/store";
 import type { RaigamReturn } from "@/lib/types";
-import { formatDate, formatQty, todayISO } from "@/lib/utils";
+import { formatDate, formatMoney, formatQty, round2, todayISO } from "@/lib/utils";
 
 const isWhole = (v: string) => v === "" || (Number.isInteger(Number(v)) && Number(v) >= 0);
 
@@ -31,7 +31,9 @@ function SendReturnsForm({ onDone }: { onDone: () => void }) {
   const [reference, setReference] = useState("");
   const [notes, setNotes] = useState("");
   const [error, setError] = useState<string>();
-  const units = held.reduce((sum, r) => sum + (isWhole(qty[r.key] ?? "") ? Number(qty[r.key] || 0) : 0), 0);
+  const sendQty = (key: string) => (isWhole(qty[key] ?? "") ? Number(qty[key] || 0) : 0);
+  const units = held.reduce((sum, r) => sum + sendQty(r.key), 0);
+  const value = round2(held.reduce((sum, r) => sum + sendQty(r.key) * avgPrice(r), 0));
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -96,11 +98,15 @@ function SendReturnsForm({ onDone }: { onDone: () => void }) {
                 <TH>Item</TH>
                 <TH>Type</TH>
                 <TH className="text-right">In Return Items</TH>
+                <TH className="text-right" title="Average credit per unit the stores got">
+                  Price
+                </TH>
                 <TH className="w-32 text-right">Send</TH>
+                <TH className="text-right">Value</TH>
               </tr>
             </THead>
             <TBody>
-              {held.length === 0 && <EmptyRow colSpan={4}>Nothing in Return Items to send.</EmptyRow>}
+              {held.length === 0 && <EmptyRow colSpan={6}>Nothing in Return Items to send.</EmptyRow>}
               {held.map((r) => (
                 <TR key={r.key}>
                   <TD className="whitespace-normal">
@@ -111,6 +117,7 @@ function SendReturnsForm({ onDone }: { onDone: () => void }) {
                     <ReturnKindBadge kind={r.kind} />
                   </TD>
                   <TD className="text-right tabular-nums">{formatQty(r.held)}</TD>
+                  <TD className="text-right tabular-nums">{formatMoney(avgPrice(r))}</TD>
                   <TD>
                     <Input
                       type="number"
@@ -128,13 +135,15 @@ function SendReturnsForm({ onDone }: { onDone: () => void }) {
                       className="h-9 text-right tabular-nums"
                     />
                   </TD>
+                  <TD className="text-right font-semibold text-slate-900 tabular-nums">{formatMoney(round2(sendQty(r.key) * avgPrice(r)))}</TD>
                 </TR>
               ))}
             </TBody>
           </Table>
         </div>
         <p className="mt-2 text-right text-sm text-slate-600">
-          Sending <span className="font-semibold text-slate-900 tabular-nums">{formatUnits(units)}</span>
+          Sending <span className="font-semibold text-slate-900 tabular-nums">{formatUnits(units)}</span> ·{" "}
+          <span className="font-semibold text-slate-900 tabular-nums">{formatMoney(value)}</span>
         </p>
       </div>
 
@@ -176,6 +185,7 @@ export function ReturnNoteDialog({ note, onClose, fromBills = [] }: { note: Raig
   const itemMap = useItemMap();
   const shopMap = useShopMap();
   const units = note?.lines.reduce((sum, l) => sum + l.qty, 0) ?? 0;
+  const total = sentValue(fromBills);
   return (
     <Modal
       open={note !== null}
@@ -191,10 +201,11 @@ export function ReturnNoteDialog({ note, onClose, fromBills = [] }: { note: Raig
     >
       {note && (
         <div className="flex flex-col gap-4">
-          <dl className="grid gap-4 sm:grid-cols-3">
+          <dl className="grid gap-4 sm:grid-cols-4">
             <Detail label="Date sent">{formatDate(note.date)}</Detail>
             <Detail label="Raigam reference">{note.reference || "—"}</Detail>
             <Detail label="Units">{formatQty(units)}</Detail>
+            <Detail label="Value">{formatMoney(total)}</Detail>
           </dl>
           {note.notes && (
             <p className="text-sm text-slate-600">
@@ -208,21 +219,36 @@ export function ReturnNoteDialog({ note, onClose, fromBills = [] }: { note: Raig
                   <TH>Item</TH>
                   <TH>Type</TH>
                   <TH className="text-right">Qty</TH>
+                  <TH className="text-right">Price</TH>
+                  <TH className="text-right">Value</TH>
                 </tr>
               </THead>
               <TBody>
-                {note.lines.map((l) => (
-                  <TR key={`${l.kind}|${l.sapCode}`}>
-                    <TD className="whitespace-normal">
-                      <span className="block font-medium text-slate-900">{itemMap.get(l.sapCode)?.description ?? "Unknown item"}</span>
-                      <span className="block font-mono text-xs text-slate-500">{l.sapCode}</span>
-                    </TD>
-                    <TD>
-                      <ReturnKindBadge kind={l.kind} />
-                    </TD>
-                    <TD className="text-right font-semibold text-slate-900 tabular-nums">{formatQty(l.qty)}</TD>
-                  </TR>
-                ))}
+                {note.lines.map((l) => {
+                  const lineValue = sentLineValue(fromBills, l.kind, l.sapCode);
+                  return (
+                    <TR key={`${l.kind}|${l.sapCode}`}>
+                      <TD className="whitespace-normal">
+                        <span className="block font-medium text-slate-900">{itemMap.get(l.sapCode)?.description ?? "Unknown item"}</span>
+                        <span className="block font-mono text-xs text-slate-500">{l.sapCode}</span>
+                      </TD>
+                      <TD>
+                        <ReturnKindBadge kind={l.kind} />
+                      </TD>
+                      <TD className="text-right font-semibold text-slate-900 tabular-nums">{formatQty(l.qty)}</TD>
+                      <TD className="text-right tabular-nums">{formatMoney(l.qty ? round2(lineValue / l.qty) : 0)}</TD>
+                      <TD className="text-right font-semibold text-slate-900 tabular-nums">{formatMoney(lineValue)}</TD>
+                    </TR>
+                  );
+                })}
+                <TR className="bg-slate-50">
+                  <TD colSpan={2} className="text-right font-semibold text-slate-900">
+                    Total
+                  </TD>
+                  <TD className="text-right font-semibold text-slate-900 tabular-nums">{formatQty(units)}</TD>
+                  <TD />
+                  <TD className="text-right font-semibold text-slate-900 tabular-nums">{formatMoney(total)}</TD>
+                </TR>
               </TBody>
             </Table>
           </div>
@@ -238,6 +264,8 @@ export function ReturnNoteDialog({ note, onClose, fromBills = [] }: { note: Raig
                       <TH>Item</TH>
                       <TH>Type</TH>
                       <TH className="text-right">Qty</TH>
+                      <TH className="text-right">Price</TH>
+                      <TH className="text-right">Value</TH>
                     </tr>
                   </THead>
                   <TBody>
@@ -258,6 +286,8 @@ export function ReturnNoteDialog({ note, onClose, fromBills = [] }: { note: Raig
                           </TD>
                           <TD>{ret && <ReturnKindBadge kind={ret.kind} />}</TD>
                           <TD className="text-right font-semibold text-slate-900 tabular-nums">{formatQty(b.qty)}</TD>
+                          <TD className="text-right tabular-nums">{formatMoney(ret?.unitPrice ?? 0)}</TD>
+                          <TD className="text-right font-semibold text-slate-900 tabular-nums">{formatMoney(round2(b.qty * (ret?.unitPrice ?? 0)))}</TD>
                         </TR>
                       );
                     })}

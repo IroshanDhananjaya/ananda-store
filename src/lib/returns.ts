@@ -16,6 +16,8 @@ export type ReturnStockRow = {
   collected: number;
   /** What the stores were credited for the collected ones */
   collectedValue: number;
+  /** What the stores will be credited for the ones still to collect */
+  toCollectValue: number;
   /** Sent back to Raigam */
   sent: number;
   /** In the return items store now (collected − sent) */
@@ -33,7 +35,7 @@ export function returnStock(sales: Sale[], raigamReturns: RaigamReturn[]): Map<s
   const rowFor = (kind: ReturnKind, sapCode: string) => {
     const key = returnKey(kind, sapCode);
     let row = rows.get(key);
-    if (!row) rows.set(key, (row = { key, kind, sapCode, toCollect: 0, collected: 0, collectedValue: 0, sent: 0, held: 0 }));
+    if (!row) rows.set(key, (row = { key, kind, sapCode, toCollect: 0, collected: 0, collectedValue: 0, toCollectValue: 0, sent: 0, held: 0 }));
     return row;
   };
   for (const s of sales) {
@@ -43,12 +45,16 @@ export function returnStock(sales: Sale[], raigamReturns: RaigamReturn[]): Map<s
       if (s.status === "Delivered") {
         row.collected += r.qty;
         row.collectedValue += r.qty * r.unitPrice;
-      } else row.toCollect += r.qty;
+      } else {
+        row.toCollect += r.qty;
+        row.toCollectValue += r.qty * r.unitPrice;
+      }
     }
   }
   for (const note of raigamReturns) for (const l of note.lines) rowFor(l.kind, l.sapCode).sent += l.qty;
   for (const row of rows.values()) {
     row.collectedValue = round2(row.collectedValue);
+    row.toCollectValue = round2(row.toCollectValue);
     row.held = row.collected - row.sent;
   }
   return rows;
@@ -56,6 +62,10 @@ export function returnStock(sales: Sale[], raigamReturns: RaigamReturn[]): Map<s
 
 /** Value of what's held, at the average credit the stores got for that item */
 export const heldValue = (row: ReturnStockRow) => (row.collected > 0 ? round2((row.collectedValue / row.collected) * row.held) : 0);
+
+/** Average credit per unit the stores got for the item (collected first, else what's to collect) */
+export const avgPrice = (row: ReturnStockRow) =>
+  row.collected > 0 ? round2(row.collectedValue / row.collected) : row.toCollect > 0 ? round2(row.toCollectValue / row.toCollect) : 0;
 
 /** Why a change can't be made because it would take back returns already sent to Raigam, if it would */
 export function sentMoreThanCollected(sales: Sale[], raigamReturns: RaigamReturn[]): string | null {
@@ -69,6 +79,13 @@ export function sentMoreThanCollected(sales: Sale[], raigamReturns: RaigamReturn
 
 /** One bill's return line sent back to Raigam on a return note (all or part of it) */
 export type SentFromBill = { sale: Sale; returnId: string; qty: number };
+/** Value of what went on a return note, at the credit price on the bills it was matched to */
+export const sentValue = (fromBills: SentFromBill[]) => round2(fromBills.reduce((sum, b) => sum + b.qty * (b.sale.returns.find((r) => r.id === b.returnId)?.unitPrice ?? 0), 0));
+
+/** Value of one item line on a return note (same matching as sentValue) */
+export const sentLineValue = (fromBills: SentFromBill[], kind: ReturnKind, sapCode: string) =>
+  sentValue(fromBills.filter((b) => b.sale.returns.some((r) => r.id === b.returnId && r.kind === kind && r.sapCode === sapCode)));
+
 export type ReturnSentInfo = { sent: number; notes: RaigamReturn[] };
 
 /**

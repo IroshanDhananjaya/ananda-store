@@ -168,6 +168,8 @@ function InvoicesPage({
   const [query, setQuery] = useState("");
   const [itemQuery, setItemQuery] = useState("");
   const [loading, setLoading] = useState(openLoad);
+  /** Load lorry opened from ?load=1 (e.g. the dashboard): list every waiting bill, not only the ones in view */
+  const [loadAll, setLoadAll] = useState(openLoad);
   const [syncing, setSyncing] = useState(false);
   const [checkingAll, setCheckingAll] = useState(false);
   const remove = useDialog<Sale>();
@@ -307,7 +309,13 @@ function InvoicesPage({
                   <FileText /> Print bills{chosen.length > 0 && ` (${chosen.length})`}
                 </Button>
               )}
-              <Button variant="outline" onClick={() => setLoading(true)}>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setLoadAll(false);
+                  setLoading(true);
+                }}
+              >
                 <Truck /> Load lorry{toLoad.length > 0 && ` (${toLoad.length})`}
               </Button>
               <Link href={shopId ? `/sales/new?store=${shopId}` : "/sales/new"} className={buttonClass()}>
@@ -602,7 +610,13 @@ function InvoicesPage({
           <CashSheet sales={live} dateOf={dateOf} period={period} route={route} storeName={shop?.shopName} />
         ))}
 
-      <LoadLorryDialog open={loading} onClose={() => setLoading(false)} preselect={preselect} />
+      <LoadLorryDialog
+        open={loading}
+        onClose={() => setLoading(false)}
+        preselect={preselect}
+        // Same bills as the button's count; ?load=1 (from the dashboard) still lists every waiting bill
+        scope={loadAll ? undefined : { ids: toLoad.map((s) => s.id), label: preset === "all" ? "this view" : period }}
+      />
       {/* At least the last week, so new bills and changes to recent ones come in even when the page shows only today */}
       {syncing && (
         <RaigamSyncDialog

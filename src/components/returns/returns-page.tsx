@@ -14,6 +14,7 @@ import { Card, FilterTabs, PageHeader, SearchInput, SummaryTile, TableFooter, To
 import { Pagination, usePagination } from "@/components/ui/pagination";
 import { EmptyRow, RowActions, Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import {
+  avgPrice,
   formatPct,
   formatUnits,
   heldValue,
@@ -22,6 +23,7 @@ import {
   returnRate,
   returnSplit,
   returnStock,
+  sentValue,
   unitsSold,
   type ReturnSentInfo,
   type ReturnStockRow,
@@ -79,6 +81,9 @@ export function ReturnsPage() {
   const toCollectUnits = sumOf(stockRows, (r) => r.toCollect);
   const billsToCollect = sales.filter((s) => (s.status === "Ordered" || s.status === "Loaded") && s.returns.length > 0).length;
   const sentUnits = sumOf(stockRows, (r) => r.sent);
+  const toCollectTotal = round2(stockRows.reduce((sum, r) => sum + r.toCollectValue, 0));
+  const noteValue = (note: RaigamReturn) => sentValue(allocations.byNote.get(note.id) ?? []);
+  const sentTotal = round2(raigamReturns.reduce((sum, n) => sum + noteValue(n), 0));
   const ofKind = (k: ReturnKind) => kind === "all" || kind === k;
   const itemText = (sapCode: string) => [sapCode, itemMap.get(sapCode)?.description];
   /** What finds a bill: its no., Raigam's invoice no., the store's name and code */
@@ -176,14 +181,27 @@ export function ReturnsPage() {
         }
       />
 
-      <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+        <SummaryTile
+          label="All return items"
+          value={formatMoney(rate.returned)}
+          sub={`${formatUnits(sumOf(stockRows, (r) => r.collected + r.toCollect))} · Good ${formatMoney(rate.good)} · Market ${formatMoney(rate.market)}`}
+        />
         <SummaryTile
           label="In Return Items"
           value={formatUnits(heldUnits)}
           sub={`Good ${formatQty(sumOf(stockRows, (r) => r.held, "Good"))} · Market ${formatQty(sumOf(stockRows, (r) => r.held, "Market"))} · ${formatMoney(heldTotal)}`}
         />
-        <SummaryTile label="To collect" value={formatUnits(toCollectUnits)} sub={`On ${billsToCollect} bill${billsToCollect === 1 ? "" : "s"} not delivered yet`} />
-        <SummaryTile label="Sent to Raigam" value={formatUnits(sentUnits)} sub={`${raigamReturns.length} return note${raigamReturns.length === 1 ? "" : "s"}`} />
+        <SummaryTile
+          label="To collect"
+          value={formatUnits(toCollectUnits)}
+          sub={`On ${billsToCollect} bill${billsToCollect === 1 ? "" : "s"} not delivered yet · ${formatMoney(toCollectTotal)}`}
+        />
+        <SummaryTile
+          label="Sent to Raigam"
+          value={formatUnits(sentUnits)}
+          sub={`${raigamReturns.length} return note${raigamReturns.length === 1 ? "" : "s"} · ${formatMoney(sentTotal)}`}
+        />
         <SummaryTile label="Return %" value={formatPct(rate.pct, rate.sold)} sub={`${returnSplit(rate)} · of ${formatMoney(rate.sold)} sold`} />
       </div>
 
@@ -258,11 +276,14 @@ export function ReturnsPage() {
                   <TH>Type</TH>
                   <TH className="text-right">Bills</TH>
                   <TH className="text-right">Qty</TH>
+                  <TH className="text-right" title="Average credit per unit on these bills">
+                    Price
+                  </TH>
                   <TH className="text-right">Credit</TH>
                 </tr>
               </THead>
               <TBody>
-                {fromBillsByItem.length === 0 && <EmptyRow colSpan={5}>No return items on these bills.</EmptyRow>}
+                {fromBillsByItem.length === 0 && <EmptyRow colSpan={6}>No return items on these bills.</EmptyRow>}
                 {fromBillsByItem.map((r) => (
                   <Fragment key={r.key}>
                     <TR className="bg-brand-50/30">
@@ -275,10 +296,11 @@ export function ReturnsPage() {
                       </TD>
                       <TD className="text-right tabular-nums">{formatQty(r.bills)}</TD>
                       <TD className="text-right font-semibold text-slate-900 tabular-nums">{formatQty(r.qty)}</TD>
-                      <TD className="text-right tabular-nums">{formatMoney(r.credit)}</TD>
+                      <TD className="text-right tabular-nums">{formatMoney(r.qty ? round2(r.credit / r.qty) : 0)}</TD>
+                      <TD className="text-right font-semibold text-slate-900 tabular-nums">{formatMoney(r.credit)}</TD>
                     </TR>
                     <tr className="bg-slate-50">
-                      <td colSpan={5} className="px-5 pt-1 pb-4 pl-11">
+                      <td colSpan={6} className="px-5 pt-1 pb-4 pl-11">
                         <ReturnBills lines={r.lines} shopName={(id) => shopMap.get(id)?.shopName ?? "—"} sent={allocations.byReturn} />
                       </td>
                     </tr>
@@ -287,7 +309,10 @@ export function ReturnsPage() {
               </TBody>
             </Table>
             <TableFooter>
-              {fromBillsByItem.length} line{fromBillsByItem.length === 1 ? "" : "s"} · {formatUnits(fromBillsUnits())} · clear the store and search to see everything in Return Items
+              {fromBillsByItem.length} line
+              {fromBillsByItem.length === 1 ? "" : "s"} · {formatUnits(fromBillsUnits())} ·{" "}
+              <span className="font-semibold text-slate-900">{formatMoney(round2(fromBillsByItem.reduce((n, r) => n + r.credit, 0)))}</span> · clear the store and search to see
+              everything in Return Items
             </TableFooter>
           </>
         )}
@@ -308,6 +333,9 @@ export function ReturnsPage() {
                   <TH className="text-right">Collected</TH>
                   <TH className="text-right">Sent to Raigam</TH>
                   <TH className="text-right">In Return Items</TH>
+                  <TH className="text-right" title="Average credit per unit the stores got">
+                    Price
+                  </TH>
                   <TH className="text-right">Value</TH>
                   <TH className="text-right" title="Units returned (collected and to collect) ÷ units of the item sold">
                     Return %
@@ -316,7 +344,7 @@ export function ReturnsPage() {
               </THead>
               <TBody>
                 {storeRows.length === 0 && (
-                  <EmptyRow colSpan={8}>
+                  <EmptyRow colSpan={9}>
                     {query || kind !== "all" ? "No return items match." : "Nothing here yet. Returns on delivered bills show here until you send them to Raigam."}
                   </EmptyRow>
                 )}
@@ -342,7 +370,8 @@ export function ReturnsPage() {
                         <TD className="text-right tabular-nums">{r.collected ? formatQty(r.collected) : "—"}</TD>
                         <TD className="text-right tabular-nums">{r.sent ? formatQty(r.sent) : "—"}</TD>
                         <TD className="text-right font-semibold text-slate-900 tabular-nums">{formatQty(r.held)}</TD>
-                        <TD className="text-right tabular-nums">{formatMoney(heldValue(r))}</TD>
+                        <TD className="text-right tabular-nums">{formatMoney(avgPrice(r))}</TD>
+                        <TD className="text-right font-semibold text-slate-900 tabular-nums">{formatMoney(heldValue(r))}</TD>
                         <TD className="text-right tabular-nums">
                           {formatPct(((r.toCollect + r.collected) / (sold.get(r.sapCode) || 1)) * 100, sold.get(r.sapCode) ?? 0)}
                           <span className="block text-xs text-slate-500">of {formatQty(sold.get(r.sapCode) ?? 0)} sold</span>
@@ -350,7 +379,7 @@ export function ReturnsPage() {
                       </TR>
                       {isOpen && (
                         <tr className="bg-slate-50">
-                          <td colSpan={8} className="px-5 pt-1 pb-4 pl-11">
+                          <td colSpan={9} className="px-5 pt-1 pb-4 pl-11">
                             <ReturnBills lines={billsByKey.get(r.key) ?? []} shopName={(id) => shopMap.get(id)?.shopName ?? "—"} sent={allocations.byReturn} />
                           </td>
                         </tr>
@@ -362,7 +391,8 @@ export function ReturnsPage() {
             </Table>
             <TableFooter>
               {storeRows.length} line{storeRows.length === 1 ? "" : "s"} · {formatUnits(sumOf(storeRows, (r) => r.held))} in Return Items ·{" "}
-              {formatMoney(round2(storeRows.reduce((sum, r) => sum + heldValue(r), 0)))} (as credited to stores)
+              <span className="font-semibold text-slate-900">{formatMoney(round2(storeRows.reduce((sum, r) => sum + heldValue(r), 0)))}</span> (as credited to stores)
+              {sumOf(storeRows, (r) => r.toCollect) > 0 && ` · ${formatMoney(round2(storeRows.reduce((sum, r) => sum + r.toCollectValue, 0)))} still to collect`}
             </TableFooter>
           </>
         )}
@@ -378,13 +408,14 @@ export function ReturnsPage() {
                   <TH>Item</TH>
                   <TH>Type</TH>
                   <TH className="text-right">Qty</TH>
+                  <TH className="text-right">Price</TH>
                   <TH className="text-right">Credit</TH>
                   <TH>Status</TH>
                 </tr>
               </THead>
               <TBody>
                 {billRows.length === 0 && (
-                  <EmptyRow colSpan={8}>
+                  <EmptyRow colSpan={9}>
                     {query || kind !== "all" || range.from || range.to
                       ? "No return items match."
                       : "No return items on bills yet. Add them on a bill (Return items) or when delivering it."}
@@ -408,7 +439,8 @@ export function ReturnsPage() {
                       <ReturnKindBadge kind={ret.kind} />
                     </TD>
                     <TD className="text-right font-semibold text-slate-900 tabular-nums">{formatQty(ret.qty)}</TD>
-                    <TD className="text-right tabular-nums">{formatMoney(round2(ret.qty * ret.unitPrice))}</TD>
+                    <TD className="text-right tabular-nums">{formatMoney(ret.unitPrice)}</TD>
+                    <TD className="text-right font-semibold text-slate-900 tabular-nums">{formatMoney(round2(ret.qty * ret.unitPrice))}</TD>
                     <TD>
                       <ReturnStatus qty={ret.qty} collected={collected} sent={allocations.byReturn.get(ret.id)} />
                     </TD>
@@ -418,7 +450,7 @@ export function ReturnsPage() {
             </Table>
             <TableFooter pager={<Pagination pager={billPager} />}>
               {billRows.length} line{billRows.length === 1 ? "" : "s"} · {formatUnits(billRows.reduce((n, x) => n + x.ret.qty, 0))} ·{" "}
-              {formatMoney(round2(billRows.reduce((sum, x) => sum + x.ret.qty * x.ret.unitPrice, 0)))} credited
+              <span className="font-semibold text-slate-900">{formatMoney(round2(billRows.reduce((sum, x) => sum + x.ret.qty * x.ret.unitPrice, 0)))}</span> credited
             </TableFooter>
           </>
         )}
@@ -433,6 +465,9 @@ export function ReturnsPage() {
                   <TH>Raigam Ref.</TH>
                   <TH className="text-right">Good</TH>
                   <TH className="text-right">Market</TH>
+                  <TH className="text-right" title="At the credit price on the bills the note was matched to">
+                    Value
+                  </TH>
                   <TH>Note</TH>
                   <TH className="w-24">
                     <span className="sr-only">Actions</span>
@@ -441,7 +476,7 @@ export function ReturnsPage() {
               </THead>
               <TBody>
                 {sentRows.length === 0 && (
-                  <EmptyRow colSpan={7}>
+                  <EmptyRow colSpan={8}>
                     {query || range.from || range.to ? "No return notes match." : "No return notes yet. Use Send to Raigam when you send return items back."}
                   </EmptyRow>
                 )}
@@ -452,6 +487,7 @@ export function ReturnsPage() {
                     <TD>{n.reference || "—"}</TD>
                     <TD className="text-right tabular-nums">{unitsOn(n, "Good") ? formatQty(unitsOn(n, "Good")) : "—"}</TD>
                     <TD className="text-right tabular-nums">{unitsOn(n, "Market") ? formatQty(unitsOn(n, "Market")) : "—"}</TD>
+                    <TD className="text-right font-semibold text-slate-900 tabular-nums">{formatMoney(noteValue(n))}</TD>
                     <TD className="max-w-64 truncate">{n.notes || "—"}</TD>
                     <TD>
                       <RowActions>
@@ -475,7 +511,8 @@ export function ReturnsPage() {
               </TBody>
             </Table>
             <TableFooter pager={<Pagination pager={sentPager} />}>
-              {sentRows.length} return note{sentRows.length === 1 ? "" : "s"} · {formatUnits(sentRows.reduce((n, x) => n + unitsOn(x), 0))}
+              {sentRows.length} return note{sentRows.length === 1 ? "" : "s"} · {formatUnits(sentRows.reduce((n, x) => n + unitsOn(x), 0))} ·{" "}
+              <span className="font-semibold text-slate-900">{formatMoney(round2(sentRows.reduce((sum, x) => sum + noteValue(x), 0)))}</span>
             </TableFooter>
           </>
         )}
@@ -512,6 +549,7 @@ function ReturnBills({ lines, shopName, sent }: { lines: BillReturn[]; shopName:
           <th className="py-2 pr-3 font-semibold">Bill No.</th>
           <th className="py-2 pr-3 font-semibold">Store</th>
           <th className="py-2 pr-3 text-right font-semibold">Qty</th>
+          <th className="py-2 pr-3 text-right font-semibold">Price</th>
           <th className="py-2 pr-3 text-right font-semibold">Credit</th>
           <th className="py-2 font-semibold">Status</th>
         </tr>
@@ -528,6 +566,7 @@ function ReturnBills({ lines, shopName, sent }: { lines: BillReturn[]; shopName:
             </td>
             <td className="py-1.5 pr-3">{shopName(sale.shopId)}</td>
             <td className="py-1.5 pr-3 text-right font-semibold text-slate-900 tabular-nums">{formatQty(ret.qty)}</td>
+            <td className="py-1.5 pr-3 text-right tabular-nums">{formatMoney(ret.unitPrice)}</td>
             <td className="py-1.5 pr-3 text-right tabular-nums">{formatMoney(round2(ret.qty * ret.unitPrice))}</td>
             <td className="py-1.5">
               <ReturnStatus qty={ret.qty} collected={collected} sent={sent.get(ret.id)} />
@@ -535,6 +574,19 @@ function ReturnBills({ lines, shopName, sent }: { lines: BillReturn[]; shopName:
           </tr>
         ))}
       </tbody>
+      {lines.length > 1 && (
+        <tfoot>
+          <tr className="border-t border-slate-300 font-semibold text-slate-900">
+            <td colSpan={3} className="py-1.5 pr-3 text-right">
+              Total
+            </td>
+            <td className="py-1.5 pr-3 text-right tabular-nums">{formatQty(lines.reduce((n, x) => n + x.ret.qty, 0))}</td>
+            <td />
+            <td className="py-1.5 pr-3 text-right tabular-nums">{formatMoney(round2(lines.reduce((n, x) => n + x.ret.qty * x.ret.unitPrice, 0)))}</td>
+            <td />
+          </tr>
+        </tfoot>
+      )}
     </table>
   );
 }

@@ -31,7 +31,10 @@ type SheetRow = {
   lines: { sale: Sale; line: SaleLine }[];
 };
 
-function LoadForm({ preselect, onDone }: { preselect: string[]; onDone: () => void }) {
+/** Only some waiting bills listed at first (e.g. the bills in view on Daily Invoices), with a way to show them all */
+export type LoadScope = { ids: string[]; label: string };
+
+function LoadForm({ preselect, scope, onDone }: { preselect: string[]; scope?: LoadScope; onDone: () => void }) {
   const sales = useAppStore((s) => s.sales);
   const routes = useAppStore((s) => s.routes);
   const stock = useAppStore((s) => s.stock);
@@ -56,7 +59,16 @@ function LoadForm({ preselect, onDone }: { preselect: string[]; onDone: () => vo
   // Loading sheet items opened to mark missing units
   const [opened, setOpened] = useState<Set<string>>(() => new Set());
 
-  const visible = waiting.filter((s) => !routeId || shopMap.get(s.shopId)?.routeId === routeId);
+  const [showAll, setShowAll] = useState(!scope);
+  const scopeIds = useMemo(() => new Set(scope?.ids), [scope]);
+  const inScope = (s: Sale) => showAll || scopeIds.has(s.id);
+  const visible = waiting.filter((s) => inScope(s) && (!routeId || shopMap.get(s.shopId)?.routeId === routeId));
+
+  function changeShowAll(all: boolean) {
+    setShowAll(all);
+    // Back to the bills in view: untick the others so nothing hidden gets loaded
+    if (!all) setSelected((sel) => new Set([...sel].filter((x) => scopeIds.has(x))));
+  }
   const chosen = waiting.filter((s) => selected.has(s.id));
 
   const missingTyped = (l: SaleLine) => missing[l.id] ?? (l.missingQty ? String(l.missingQty) : "");
@@ -199,6 +211,23 @@ function LoadForm({ preselect, onDone }: { preselect: string[]; onDone: () => vo
         </Field>
       </div>
 
+      {scope && waiting.length > scopeIds.size && (
+        <p className="-mb-2 flex flex-wrap items-center justify-between gap-2 text-sm text-slate-600">
+          <span>
+            {showAll ? (
+              <>All {formatQty(waiting.length)} bills waiting to load, any date</>
+            ) : (
+              <>
+                Bills waiting to load in <span className="font-medium text-slate-900">{scope.label}</span>
+              </>
+            )}
+          </span>
+          <button type="button" onClick={() => changeShowAll(!showAll)} className="text-sm font-medium text-brand-700 hover:underline">
+            {showAll ? `Only ${scope.label}` : `Show all ${formatQty(waiting.length)} waiting bills`}
+          </button>
+        </p>
+      )}
+
       <div className="overflow-hidden rounded-lg border border-slate-200">
         <StackBox>
           <table className="w-full text-sm">
@@ -232,7 +261,8 @@ function LoadForm({ preselect, onDone }: { preselect: string[]; onDone: () => vo
               {visible.length === 0 && (
                 <tr>
                   <td colSpan={5} className="px-3 py-8 text-center text-slate-500">
-                    No bills waiting to load{routeId ? " on this route" : ""}.
+                    No bills waiting to load{routeId ? " on this route" : ""}
+                    {!showAll && scope ? ` in ${scope.label}` : ""}.
                   </td>
                 </tr>
               )}
@@ -419,7 +449,18 @@ function LoadForm({ preselect, onDone }: { preselect: string[]; onDone: () => vo
   );
 }
 
-export function LoadLorryDialog({ open, onClose, preselect = [] }: { open: boolean; onClose: () => void; preselect?: string[] }) {
+export function LoadLorryDialog({
+  open,
+  onClose,
+  preselect = [],
+  scope,
+}: {
+  open: boolean;
+  onClose: () => void;
+  preselect?: string[];
+  /** List only these waiting bills at first */
+  scope?: LoadScope;
+}) {
   return (
     <Modal
       open={open}
@@ -438,7 +479,7 @@ export function LoadLorryDialog({ open, onClose, preselect = [] }: { open: boole
         </>
       }
     >
-      <LoadForm key={preselect.join(",")} preselect={preselect} onDone={onClose} />
+      <LoadForm key={`${preselect.join(",")}|${scope?.ids.join(",") ?? ""}`} preselect={preselect} scope={scope} onDone={onClose} />
     </Modal>
   );
 }
