@@ -3,8 +3,8 @@
 import { Camera, CameraOff, Crosshair, Pause, Play, RotateCcw } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type MouseEvent } from "react";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/layout";
-import { countItems, type CountBlob } from "@/lib/item-counter";
+import { Card, FilterTabs } from "@/components/ui/layout";
+import { countItems, type CountBlob, type Polarity } from "@/lib/item-counter";
 import { PhoneLink } from "./phone-link";
 import { cn, formatQty } from "@/lib/utils";
 
@@ -41,12 +41,13 @@ export function CounterPage({ phone = false }: { phone?: boolean }) {
   const [sensitivity, setSensitivity] = useState(0);
   const [unitArea, setUnitArea] = useState<number>();
   const [picking, setPicking] = useState(false);
+  const [polarity, setPolarity] = useState<Polarity>("auto");
 
   // The loop reads these without restarting
-  const settings = useRef({ sensitivity, unitArea, held });
+  const settings = useRef({ sensitivity, unitArea, held, polarity });
   useEffect(() => {
-    settings.current = { sensitivity, unitArea, held };
-  }, [sensitivity, unitArea, held]);
+    settings.current = { sensitivity, unitArea, held, polarity };
+  }, [sensitivity, unitArea, held, polarity]);
 
   const stop = useCallback(() => {
     streamRef.current?.getTracks().forEach((t) => t.stop());
@@ -222,6 +223,22 @@ export function CounterPage({ phone = false }: { phone?: boolean }) {
               <RotateCcw /> Auto size
             </Button>
           )}
+          <div className="flex items-center gap-2 text-sm text-slate-700">
+            Items are
+            <FilterTabs<Polarity>
+              value={polarity}
+              onChange={(v) => {
+                setPolarity(v);
+                recent.current = [];
+              }}
+              options={[
+                { value: "auto", label: "Auto" },
+                { value: "light", label: "Lighter" },
+                { value: "dark", label: "Darker" },
+              ]}
+            />
+            <span className="text-xs text-slate-500">than the floor</span>
+          </div>
           <label className="flex min-w-56 flex-1 items-center gap-3 text-sm text-slate-700">
             Sensitivity
             <input
@@ -240,7 +257,8 @@ export function CounterPage({ phone = false }: { phone?: boolean }) {
             <span className="w-8 text-right text-slate-500 tabular-nums">{sensitivity > 0 ? `+${sensitivity}` : sensitivity}</span>
           </label>
           <p className="w-full text-xs text-slate-500">
-            Blue = one item · orange ×2 = touching items counted by size. Stacked items or items the colour of the floor can&apos;t be counted by the camera.
+            Blue = one item · orange ×2 = touching items counted by size. Keep every item fully inside the picture: anything touching its edge
+            isn&apos;t counted. Stacked items or items the colour of the floor can&apos;t be counted by the camera.
           </p>
         </div>
       )}
