@@ -10,7 +10,7 @@ import { Button, buttonClass } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { DateRangePicker, inDateRange, type DateRange } from "@/components/ui/date-range-picker";
 import { Select } from "@/components/ui/form";
-import { Card, FilterTabs, PageHeader, SearchInput, TableFooter, Toolbar } from "@/components/ui/layout";
+import { Card, ClearFilters, FilterTabs, PageHeader, SearchInput, TableFooter, Toolbar } from "@/components/ui/layout";
 import { Pagination, usePagination } from "@/components/ui/pagination";
 import { EmptyRow, RowActions, Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { useAppStore } from "@/lib/store";
@@ -92,6 +92,14 @@ export function OrdersPage() {
             <option value="order">By order date</option>
             <option value="received">By received date</option>
           </Select>
+          <ClearFilters
+            active={!!(query || status !== "all" || range.from || range.to)}
+            onClear={() => {
+              setQuery("");
+              setStatus("all");
+              setRange({ from: "", to: "" });
+            }}
+          />
           <div className="sm:ml-auto">
             <FilterTabs<StatusFilter>
               value={status}

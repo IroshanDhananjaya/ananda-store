@@ -1,6 +1,9 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createSupabase } from "@/lib/supabase";
 
+/** Open without signing in: the phone item counter only uses the camera, no store data or server calls */
+const PUBLIC = new Set(["/count"]);
+
 // Runs before every page: refreshes the login cookies and sends signed-out visitors to
 // /login (and signed-in ones away from it). Only a convenience: the server actions
 // check the login again themselves, so the data is safe even if this doesn't run.
@@ -22,6 +25,7 @@ export async function proxy(request: NextRequest) {
   if (request.method !== "GET") return response;
 
   const { pathname, search } = request.nextUrl;
+  if (PUBLIC.has(pathname)) return response;
   let to: URL | undefined;
   if (!data && pathname !== "/login") {
     to = new URL("/login", request.url);

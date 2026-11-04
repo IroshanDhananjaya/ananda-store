@@ -60,7 +60,7 @@ export function THead({ children }: { children: ReactNode }) {
 }
 
 export function TH({ className, ...props }: ComponentProps<"th">) {
-  return <th className={cn("px-3 py-3 font-semibold whitespace-nowrap first:pl-5 last:pr-5", className)} {...props} />;
+  return <th className={cn("px-3 py-2.5 font-semibold whitespace-nowrap first:pl-5 last:pr-5", className)} {...props} />;
 }
 
 export function TBody({ children }: { children: ReactNode }) {
@@ -72,7 +72,7 @@ export function TR({ className, ...props }: ComponentProps<"tr">) {
 }
 
 export function TD({ className, ...props }: ComponentProps<"td">) {
-  return <td className={cn("px-3 py-3 whitespace-nowrap text-slate-700 first:pl-5 last:pr-5", className)} {...props} />;
+  return <td className={cn("px-3 py-2 whitespace-nowrap text-slate-700 first:pl-5 last:pr-5", className)} {...props} />;
 }
 
 /** A heading row inside a table body, e.g. the item category the rows below are under */
@@ -98,5 +98,5 @@ export function EmptyRow({ colSpan, children }: { colSpan: number; children: Rea
 
 /** Right-aligned icon buttons at the end of a row */
 export function RowActions({ children }: { children: ReactNode }) {
-  return <div className="flex items-center justify-end gap-1">{children}</div>;
+  return <div className="flex items-center justify-end gap-0.5">{children}</div>;
 }

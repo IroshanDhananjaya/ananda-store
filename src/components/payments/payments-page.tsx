@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { DateRangePicker, inDateRange, type DateRange } from "@/components/ui/date-range-picker";
 import { Select } from "@/components/ui/form";
-import { Card, FilterTabs, PageHeader, SearchInput, TableFooter, Toolbar } from "@/components/ui/layout";
+import { Card, ClearFilters, FilterTabs, PageHeader, SearchInput, TableFooter, Toolbar } from "@/components/ui/layout";
 import { Pagination, usePagination } from "@/components/ui/pagination";
 import { EmptyRow, RowActions, Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { useAppStore, useRouteMap, useShopMap } from "@/lib/store";
@@ -78,6 +78,15 @@ export function PaymentsPage() {
             ))}
           </Select>
           <DateRangePicker value={range} onChange={setRange} />
+          <ClearFilters
+            active={!!(query || routeId || method !== "all" || range.from || range.to)}
+            onClear={() => {
+              setQuery("");
+              setRouteId("");
+              setMethod("all");
+              setRange({ from: "", to: "" });
+            }}
+          />
           <div className="sm:ml-auto">
             <FilterTabs<Filter>
               value={method}

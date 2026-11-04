@@ -20,7 +20,7 @@ const variants: Record<Variant, string> = {
 const sizes: Record<Size, string> = {
   sm: "h-8 px-3 text-sm",
   md: "h-10 px-4 text-sm",
-  icon: "size-8",
+  icon: "size-9",
 };
 
 export function buttonClass(variant: Variant = "primary", size: Size = "md", className?: string) {

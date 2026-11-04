@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono, Roboto_Slab } from "next/font/google";
+import { THEME_SCRIPT } from "@/lib/theme-script";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -29,7 +30,16 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="en" className={`${geistSans.variable} ${geistMono.variable} ${robotoSlab.variable} h-full antialiased`}>
+    // data-theme is changed by THEME_SCRIPT before React hydrates, so React keeps what's in the DOM
+    <html
+      lang="en"
+      data-theme="light"
+      suppressHydrationWarning
+      className={`${geistSans.variable} ${geistMono.variable} ${robotoSlab.variable} h-full antialiased`}
+    >
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
+      </head>
       <body className="min-h-full font-sans">{children}</body>
     </html>
   );

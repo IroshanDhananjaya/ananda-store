@@ -3,6 +3,8 @@
 import {
   ArchiveRestore,
   CalendarDays,
+  Camera,
+  ChevronDown,
   ClipboardList,
   Gift,
   HandCoins,
@@ -13,12 +15,15 @@ import {
   LogOut,
   MapPin,
   Menu,
+  Monitor,
+  Moon,
   Package,
   PackageX,
   Receipt,
   RotateCcw,
   Route,
   Store,
+  Sun,
   TrendingUp,
   Trophy,
   Warehouse,
@@ -27,7 +32,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { startTransition, Suspense, useEffect, useState, type ReactNode } from "react";
+import { startTransition, Suspense, useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
 import { Toaster, toast } from "sonner";
 import { LogoMark } from "@/components/logo";
 import { ChequeReminder } from "@/components/orders/cheque-reminder";
@@ -35,89 +40,167 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Button } from "@/components/ui/button";
 import { signOut } from "@/lib/actions";
 import { useAppStore } from "@/lib/store";
+import { setTheme, useThemeChoice, type ThemeChoice } from "@/lib/theme";
 import { cn } from "@/lib/utils";
 
 /** `also`: pages under this path count as this one (highlighted in the sidebar) */
 type NavItem = { href: string; label: string; icon: LucideIcon; also?: string };
+/** `open`: shown open until the user folds it (the group of the page you're on always opens) */
+type NavGroup = { id: string; title: string | null; open?: boolean; items: NavItem[] };
 
-const nav: { title: string | null; items: NavItem[] }[] = [
+// Grouped by the day's work: what's used every day first, setup and reports folded away
+const nav: NavGroup[] = [
+  { id: "home", title: null, items: [{ href: "/", label: "Dashboard", icon: LayoutDashboard }] },
   {
-    title: null,
+    id: "daily",
+    title: "Daily work",
+    open: true,
     items: [
-      { href: "/", label: "Dashboard", icon: LayoutDashboard },
-      { href: "/checks", label: "Data Checks", icon: ShieldCheck },
-    ],
-  },
-  {
-    title: "Sales",
-    items: [
-      { href: "/routes", label: "Routes", icon: Route },
-      { href: "/stores", label: "Stores", icon: Store },
       // Bills (/sales/…) open from here
       { href: "/invoices", label: "Daily Invoices", icon: CalendarDays, also: "/sales" },
-      { href: "/free-issues", label: "Free Issues", icon: Gift },
-      { href: "/top-items", label: "Top Selling Items", icon: Trophy },
       { href: "/payments", label: "Payments", icon: HandCoins },
       { href: "/cheques", label: "Cheques & Credit", icon: Landmark },
-    ],
-  },
-  {
-    title: "Accounts",
-    items: [
-      { href: "/profit", label: "Profit", icon: TrendingUp },
       { href: "/expenses", label: "Expenses", icon: Receipt },
     ],
   },
   {
-    title: "Purchasing",
+    id: "stock",
+    title: "Stock & purchasing",
+    open: true,
     items: [
+      { href: "/stock", label: "Stock", icon: Warehouse },
       { href: "/orders", label: "Purchase Orders", icon: ClipboardList },
       { href: "/order-items", label: "Order Items", icon: ListChecks },
       { href: "/order-differences", label: "Missing & Not Ordered", icon: PackageX },
+      { href: "/counter", label: "Item Counter", icon: Camera },
     ],
   },
   {
-    title: "Warehouse",
+    id: "claims",
+    title: "Returns & claims",
+    open: true,
     items: [
-      { href: "/stock", label: "Stock", icon: Warehouse },
       { href: "/returns", label: "Return Items", icon: ArchiveRestore },
+      { href: "/free-issues", label: "Free Issues", icon: Gift },
+    ],
+  },
+  {
+    id: "reports",
+    title: "Reports",
+    items: [
+      { href: "/profit", label: "Profit", icon: TrendingUp },
+      { href: "/top-items", label: "Top Selling Items", icon: Trophy },
+    ],
+  },
+  {
+    id: "setup",
+    title: "Setup",
+    items: [
+      { href: "/routes", label: "Routes", icon: Route },
+      { href: "/stores", label: "Stores", icon: Store },
       { href: "/items", label: "Items", icon: Package },
       { href: "/locations", label: "Stock Locations", icon: MapPin },
+      { href: "/checks", label: "Data Checks", icon: ShieldCheck },
     ],
   },
 ];
 
+const FOLDED_KEY = "nav-folded";
+const defaultFolded = () => Object.fromEntries(nav.filter((g) => g.title).map((g) => [g.id, !g.open]));
+
+/** Folded groups as saved; kept in memory too when the browser can't store it (private window) */
+let foldedMemory = "";
+const foldedListeners = new Set<() => void>();
+function readFolded() {
+  try {
+    return localStorage.getItem(FOLDED_KEY) ?? foldedMemory;
+  } catch {
+    return foldedMemory;
+  }
+}
+
+/** Which groups are folded: remembered in this browser (a convenience; it starts from the defaults without it) */
+function useFolded() {
+  const raw = useSyncExternalStore(
+    (onChange) => {
+      foldedListeners.add(onChange);
+      return () => foldedListeners.delete(onChange);
+    },
+    readFolded,
+    () => "",
+  );
+  const folded = useMemo<Record<string, boolean>>(() => {
+    try {
+      return { ...defaultFolded(), ...(raw ? JSON.parse(raw) : {}) };
+    } catch {
+      return defaultFolded();
+    }
+  }, [raw]);
+  const toggle = (id: string) => {
+    foldedMemory = JSON.stringify({ ...folded, [id]: !folded[id] });
+    try {
+      localStorage.setItem(FOLDED_KEY, foldedMemory);
+    } catch {
+      // Not remembered after a reload; still works for now
+    }
+    foldedListeners.forEach((l) => l());
+  };
+  return { folded, toggle };
+}
+
 function NavLinks({ pathname, onNavigate }: { pathname: string | null; onNavigate?: () => void }) {
+  const { folded, toggle } = useFolded();
+  const under = (path: string) => pathname === path || pathname?.startsWith(path + "/");
+  const isActive = ({ href, also }: NavItem) => pathname !== null && (href === "/" ? pathname === "/" : under(href) || (!!also && under(also)));
+
   return (
-    <nav className="flex flex-col gap-5">
-      {nav.map((section) => (
-        <div key={section.title ?? "main"} className="flex flex-col gap-1">
-          {section.title && (
-            <p className="px-3 pb-1 text-[11px] font-semibold tracking-wider text-brand-300 uppercase">{section.title}</p>
-          )}
-          {section.items.map(({ href, label, icon: Icon, also }) => {
-            const under = (path: string) => pathname === path || pathname?.startsWith(path + "/");
-            const active = pathname !== null && (href === "/" ? pathname === "/" : under(href) || (!!also && under(also)));
-            return (
-              <Link
-                key={href}
-                href={href}
-                onClick={onNavigate}
-                className={cn(
-                  "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
-                  // Orange bar on the current page, like the logo's swoosh
-                  active
-                    ? "bg-white/15 text-white shadow-[inset_3px_0_0_var(--color-accent-500)]"
-                    : "text-brand-100 hover:bg-white/10 hover:text-white",
-                )}
+    <nav className="flex flex-col gap-3">
+      {nav.map((group) => {
+        const hasActive = group.items.some(isActive);
+        // The group of the page you're on stays open
+        const open = !group.title || hasActive || !folded[group.id];
+        return (
+          <div key={group.id} className="flex flex-col gap-0.5">
+            {group.title && (
+              <button
+                type="button"
+                onClick={() => toggle(group.id)}
+                disabled={hasActive}
+                aria-expanded={open}
+                className="flex items-center justify-between rounded-md px-3 py-1 text-[11px] font-semibold tracking-wider text-brand-300 uppercase hover:text-white disabled:cursor-default disabled:hover:text-brand-300"
               >
-                <Icon className="size-4.5 shrink-0" />
-                {label}
-              </Link>
-            );
-          })}
-        </div>
-      ))}
+                <span>{group.title}</span>
+                <span className="flex items-center gap-1.5">
+                  {!open && <span className="font-normal tabular-nums normal-case">{group.items.length}</span>}
+                  {!hasActive && <ChevronDown className={cn("size-3.5 transition-transform", !open && "-rotate-90")} />}
+                </span>
+              </button>
+            )}
+            {open &&
+              group.items.map((item) => {
+                const { href, label, icon: Icon } = item;
+                const active = isActive(item);
+                return (
+                  <Link
+                    key={href}
+                    href={href}
+                    onClick={onNavigate}
+                    className={cn(
+                      "flex items-center gap-3 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors",
+                      // Orange bar on the current page, like the logo's swoosh
+                      active
+                        ? "bg-white/15 text-white shadow-[inset_3px_0_0_var(--color-accent-500)]"
+                        : "text-brand-100 hover:bg-white/10 hover:text-white",
+                    )}
+                  >
+                    <Icon className="size-4.5 shrink-0" />
+                    {label}
+                  </Link>
+                );
+              })}
+          </div>
+        );
+      })}
     </nav>
   );
 }
@@ -127,6 +210,37 @@ function NavLinks({ pathname, onNavigate }: { pathname: string | null; onNavigat
 function ActiveNavLinks({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname();
   return <NavLinks pathname={pathname} onNavigate={onNavigate} />;
+}
+
+const THEMES: { value: ThemeChoice; label: string; icon: LucideIcon }[] = [
+  { value: "light", label: "Light", icon: Sun },
+  { value: "system", label: "System", icon: Monitor },
+  { value: "dark", label: "Dark", icon: Moon },
+];
+
+/** Light, System (the computer's setting) or Dark */
+function ThemeSwitch() {
+  const choice = useThemeChoice();
+  return (
+    <div role="radiogroup" aria-label="Theme" className="grid grid-cols-3 gap-1 rounded-lg bg-white/5 p-1">
+      {THEMES.map(({ value, label, icon: Icon }) => (
+        <button
+          key={value}
+          type="button"
+          role="radio"
+          aria-checked={choice === value}
+          onClick={() => setTheme(value)}
+          title={value === "system" ? "Follow the computer's light / dark setting" : `${label} theme`}
+          className={cn(
+            "flex items-center justify-center gap-1.5 rounded-md py-1.5 text-xs font-medium transition-colors",
+            choice === value ? "bg-white/15 text-white" : "text-brand-200 hover:bg-white/10 hover:text-white",
+          )}
+        >
+          <Icon className="size-3.5" /> {label}
+        </button>
+      ))}
+    </div>
+  );
 }
 
 /** Who is signed in, and Sign out. A full page load of /login, so no data is left in the browser. */
@@ -160,7 +274,7 @@ function UserBox() {
 function SidebarContent({ onNavigate, onReset }: { onNavigate?: () => void; onReset: () => void }) {
   const canResetDemo = useAppStore((s) => s.canResetDemo);
   return (
-    <div className="flex h-full flex-col gap-6 overflow-y-auto px-4 py-5">
+    <div className="flex h-full flex-col gap-5 overflow-y-auto px-3 py-4">
       <Link href="/" onClick={onNavigate} className="flex items-center gap-3 px-2">
         <span className="grid size-10 shrink-0 place-items-center rounded-lg bg-white">
           <LogoMark size={32} />
@@ -185,6 +299,7 @@ function SidebarContent({ onNavigate, onReset }: { onNavigate?: () => void; onRe
             </button>
           </div>
         )}
+        <ThemeSwitch />
         <UserBox />
       </div>
     </div>
@@ -220,6 +335,7 @@ function LoadError({ message, onRetry }: { message: string; onRetry: () => void 
 }
 
 export function AppShell({ children }: { children: ReactNode }) {
+  const theme = useThemeChoice();
   const loaded = useAppStore((s) => s.loaded);
   const loadError = useAppStore((s) => s.loadError);
   const saving = useAppStore((s) => s.saving);
@@ -260,7 +376,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   return (
     <div className="flex min-h-dvh">
       {/* Desktop sidebar */}
-      <aside className="fixed inset-y-0 left-0 hidden w-64 bg-brand-800 lg:block print:hidden">
+      <aside className="fixed inset-y-0 left-0 hidden w-56 bg-brand-800 lg:block print:hidden">
         <SidebarContent onReset={openReset} />
       </aside>
 
@@ -282,7 +398,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         </div>
       )}
 
-      <div className="flex min-w-0 flex-1 flex-col lg:pl-64 print:pl-0">
+      <div className="flex min-w-0 flex-1 flex-col lg:pl-56 print:pl-0">
         <header className="sticky top-0 z-30 flex items-center gap-3 border-b border-slate-200 bg-white/90 px-4 py-3 backdrop-blur lg:hidden print:hidden">
           <button
             type="button"
@@ -297,7 +413,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           </span>
         </header>
 
-        <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+        <main className="w-full min-w-0 flex-1 px-4 py-4 sm:px-5 lg:px-6 lg:py-5">
           {loaded ? (
             <>
               {/* Raigam cheques about to be deposited, on every page */}
@@ -334,8 +450,8 @@ export function AppShell({ children }: { children: ReactNode }) {
           Saving…
         </div>
       )}
-      {/* Bottom: the pages' buttons are in the bar at the top, and a message mustn't cover them */}
-      <Toaster position="bottom-center" richColors closeButton />
+      {/* Top right, under the pinned page header: clear of the page buttons and the bottom Save bars */}
+      <Toaster theme={theme} position="top-right" offset={{ top: 72, right: 16 }} richColors closeButton visibleToasts={3} duration={4500} />
     </div>
   );
 }

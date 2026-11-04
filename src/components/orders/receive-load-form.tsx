@@ -494,7 +494,7 @@ export function ReceiveLoadForm({ onSaved, cancelHref }: { onSaved: (id: string)
 
         {/* Narrower screens: keep the total and Save in view at the bottom */}
         <div
-          className="sticky bottom-0 z-20 -mx-4 flex items-center gap-3 border-t border-slate-200 bg-white/95 px-4 py-3 shadow-[0_-4px_12px_rgba(15,23,42,0.06)] backdrop-blur sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8 min-[1360px]:hidden"
+          className="sticky bottom-0 z-20 -mx-4 flex items-center gap-3 border-t border-slate-200 bg-white/95 px-4 py-3 shadow-[0_-4px_12px_rgba(15,23,42,0.06)] backdrop-blur sm:-mx-5 sm:px-5 lg:-mx-6 lg:px-6 min-[1360px]:hidden"
         >
           <div className="min-w-0 flex-1">
             <p className="text-xs text-slate-500">

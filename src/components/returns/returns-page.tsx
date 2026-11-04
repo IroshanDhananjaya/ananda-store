@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { DateRangePicker, inDateRange, type DateRange } from "@/components/ui/date-range-picker";
 import { Select } from "@/components/ui/form";
-import { Card, FilterTabs, PageHeader, SearchInput, SummaryTile, TableFooter, Toolbar } from "@/components/ui/layout";
+import { Card, ClearFilters, FilterTabs, PageHeader, SearchInput, SummaryTile, TableFooter, Toolbar } from "@/components/ui/layout";
 import { Pagination, usePagination } from "@/components/ui/pagination";
 import { EmptyRow, RowActions, Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import {
@@ -181,7 +181,7 @@ export function ReturnsPage() {
         }
       />
 
-      <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+      <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
         <SummaryTile
           label="All return items"
           value={formatMoney(rate.returned)}
@@ -245,7 +245,12 @@ export function ReturnsPage() {
             />
           )}
           {tab !== "sent" && (
-            <Select value={storeId} onChange={(e) => setStoreId(e.target.value)} className="h-9 sm:w-56" aria-label="Filter by store">
+            <Select
+              value={storeId}
+              onChange={(e) => setStoreId(e.target.value)}
+              className={cn("h-9 sm:w-56", storeId && "border-brand-500 bg-brand-50 font-medium text-brand-800")}
+              aria-label="Filter by store"
+            >
               <option value="">All stores</option>
               {storeShops.map((s) => (
                 <option key={s.id} value={s.id}>
@@ -256,6 +261,15 @@ export function ReturnsPage() {
             </Select>
           )}
           {tab !== "store" && <DateRangePicker value={range} onChange={setRange} />}
+          <ClearFilters
+            active={!!(query || storeId || (tab !== "sent" && kind !== "all") || (tab !== "store" && (range.from || range.to)))}
+            onClear={() => {
+              setQuery("");
+              setStoreId("");
+              setKind("all");
+              setRange({ from: "", to: "" });
+            }}
+          />
         </Toolbar>
 
         {tab === "store" && byBills && (

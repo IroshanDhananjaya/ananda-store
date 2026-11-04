@@ -9,6 +9,7 @@ import { FilterTabs, SearchInput } from "@/components/ui/layout";
 import { useAppStore, useLastInvoicePrices } from "@/lib/store";
 import type { Item, Order, OrderInput, OrderItem, OrderLineInput } from "@/lib/types";
 import { cn, formatDate, formatMoney, formatQty, includesText, nextOrderId, NOT_PAID, orderLineValue, paymentOf, round2, todayISO } from "@/lib/utils";
+import { OrderSuggestions } from "./order-suggestions";
 import { ReceiveCheckSheet, sheetUom } from "./receive-check-sheet";
 
 /** Heading for items that aren't on Raigam's sheet (no section set on the item) */
@@ -224,6 +225,15 @@ export function OrderSheet({
     <form onSubmit={handleSubmit} onKeyDown={onKeyDown} noValidate className="flex flex-col gap-4 print:block print:text-black">
       <style>{"@page { size: A4 portrait; margin: 8mm; }"}</style>
 
+      <OrderSuggestions
+        exceptOrderId={order?.orderId}
+        qtyOf={qtyOf}
+        onUse={(picks) => {
+          setQty((q) => ({ ...q, ...Object.fromEntries(picks.map((p) => [p.sapCode, String(p.qty)])) }));
+          setError(undefined);
+        }}
+      />
+
       <div
         className={cn(
           "overflow-hidden rounded-xl border border-slate-300 bg-white shadow-sm print:overflow-visible print:rounded-none print:border-0 print:shadow-none",
@@ -406,7 +416,7 @@ export function OrderSheet({
       {printCheck && <ReceiveCheckSheet orderRef={orderRef} orderDate={orderDate} requiredDate={requiredDate} lines={orderLines} />}
 
       {/* Stays at the bottom of the screen while scrolling the sheet */}
-      <div className="sticky bottom-0 z-20 -mx-4 border-t border-slate-200 bg-white/95 px-4 py-3 shadow-[0_-4px_12px_-6px_rgb(15_23_42/0.15)] backdrop-blur sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8 print:hidden">
+      <div className="sticky bottom-0 z-20 -mx-4 border-t border-slate-200 bg-white/95 px-4 py-3 shadow-[0_-4px_12px_-6px_rgb(15_23_42/0.15)] backdrop-blur sm:-mx-5 sm:px-5 lg:-mx-6 lg:px-6 print:hidden">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
           <div className="min-w-0 flex-1 text-sm">
             {error ? (

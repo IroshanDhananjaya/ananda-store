@@ -1,8 +1,10 @@
 import { ArrowLeft, Search } from "lucide-react";
 import Link from "next/link";
+import { X } from "lucide-react";
 import type { ComponentProps, ReactNode } from "react";
 import { cn } from "@/lib/utils";
-import { buttonClass } from "./button";
+import { Button, buttonClass } from "./button";
+import { StickyHeader } from "./sticky-header";
 
 export function BackLink({ href, children }: { href: string; children: ReactNode }) {
   return (
@@ -37,11 +39,11 @@ export function SummaryTile({
   tone?: "default" | "danger" | "good";
 }) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-white px-5 py-4 shadow-sm">
+    <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
       <p className="text-xs font-medium tracking-wide text-slate-500 uppercase">{label}</p>
       <p
         className={cn(
-          "mt-1.5 text-xl font-semibold tracking-tight tabular-nums",
+          "mt-1 text-lg leading-tight font-semibold tracking-tight tabular-nums",
           tone === "danger" ? "text-red-600" : tone === "good" ? "text-emerald-700" : "text-slate-900",
         )}
       >
@@ -62,6 +64,7 @@ export function Detail({ label, children }: { label: string; children: ReactNode
   );
 }
 
+/** A page's title and buttons, pinned to the top of the screen while the page scrolls (StickyHeader) */
 export function PageHeader({
   title,
   description,
@@ -71,16 +74,7 @@ export function PageHeader({
   description?: ReactNode;
   actions?: ReactNode;
 }) {
-  return (
-    <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between sm:gap-6">
-      {/* flex-1 + min-w-0: a long description wraps instead of squeezing the buttons onto two lines */}
-      <div className="min-w-0 flex-1">
-        <h1 className="text-2xl font-semibold tracking-tight text-slate-900">{title}</h1>
-        {description && <p className="mt-1 text-sm text-slate-500">{description}</p>}
-      </div>
-      {actions && <div className="flex flex-wrap items-center gap-2 sm:justify-end">{actions}</div>}
-    </div>
-  );
+  return <StickyHeader title={title} description={description} actions={actions} />;
 }
 
 export function Card({ className, children }: { className?: string; children: ReactNode }) {
@@ -107,7 +101,7 @@ export function CardHeader({ title, description, actions }: { title: ReactNode; 
 /** Search + filters row above a table */
 export function Toolbar({ children }: { children: ReactNode }) {
   return (
-    <div className="flex flex-col gap-3 border-b border-slate-200 bg-slate-50/60 px-4 py-3 sm:flex-row sm:flex-wrap sm:items-center">
+    <div className="flex flex-col gap-2 border-b border-slate-200 bg-slate-50/60 px-4 py-2.5 sm:flex-row sm:flex-wrap sm:items-center">
       {children}
     </div>
   );
@@ -144,7 +138,7 @@ export function FilterTabs<T extends string>({
           type="button"
           onClick={() => onChange(o.value)}
           className={cn(
-            "rounded-md px-3 py-1 text-xs font-medium transition-colors",
+            "rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
             value === o.value ? "bg-white text-slate-900 shadow-sm" : "text-slate-600 hover:text-slate-900",
           )}
         >
@@ -153,6 +147,16 @@ export function FilterTabs<T extends string>({
         </button>
       ))}
     </div>
+  );
+}
+
+/** Shown in a Toolbar while any filter is on: one click puts every filter back */
+export function ClearFilters({ active, onClear }: { active: boolean; onClear: () => void }) {
+  if (!active) return null;
+  return (
+    <Button variant="ghost" size="sm" onClick={onClear} className="text-brand-700 hover:bg-brand-50 hover:text-brand-800" title="Show everything again">
+      <X /> Clear filters
+    </Button>
   );
 }
 

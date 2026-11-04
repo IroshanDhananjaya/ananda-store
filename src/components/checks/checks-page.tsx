@@ -151,7 +151,7 @@ export function ChecksPage() {
     <>
       <PageHeader title="Data Checks" description="Things in the data to fix or follow up. Each one links to where you fix it." />
 
-      <div className="mb-6 grid gap-4 sm:grid-cols-3">
+      <div className="mb-4 grid gap-3 sm:grid-cols-3">
         <SummaryTile label="To fix" value={problems} sub={`In ${failing.length} of ${checks.length} checks`} tone={problems ? "danger" : "good"} />
         <SummaryTile label="Urgent" value={failing.filter((c) => c.tone === "red").reduce((n, c) => n + c.rows.length, 0)} sub="Money or deliveries at risk" />
         <SummaryTile label="All clear" value={checks.length - failing.length} sub="Checks with nothing to fix" tone="good" />

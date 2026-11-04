@@ -44,6 +44,122 @@ html[data-modal-open="true"] {
   overflow: hidden;
 }
 
+/* `dark:` for new code; the theme in use is <html data-theme>, set by lib/theme.ts */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+/*
+ * Dark theme. The pages are written with light colours (bg-white, text-slate-900, bg-red-50…), so dark is
+ * done here instead of on every class: the slate greys swap ends, light tints (50–200) become dark tints,
+ * coloured text (600–900) turns light, and white cards become dark cards. Screen only: printing stays
+ * black on white. Unlayered, so these win over Tailwind's utilities.
+ */
+@media screen {
+  [data-theme="dark"] {
+    color-scheme: dark;
+
+    --color-slate-50: #0b1220;
+    --color-slate-100: #162033;
+    --color-slate-200: #253147;
+    --color-slate-300: #34425a;
+    --color-slate-400: #6b7a93;
+    --color-slate-500: #93a1b6;
+    --color-slate-600: #b2bdcd;
+    --color-slate-700: #c9d2de;
+    --color-slate-800: #e0e6ee;
+    --color-slate-900: #f1f4f8;
+    --color-slate-950: #f8fafc;
+
+    --color-brand-50: #0e1f3a;
+    --color-brand-100: #13294b;
+    --color-brand-200: #1d3c6b;
+    --color-accent-50: #2c1a0c;
+    --color-accent-100: #3d240e;
+    --color-accent-200: #5e3614;
+    --color-orange-50: #2c1a0c;
+    --color-red-50: #2b1317;
+    --color-red-100: #3b171c;
+    --color-red-200: #5b2128;
+    --color-amber-50: #2a1e0b;
+    --color-amber-100: #3a2a0d;
+    --color-amber-200: #5a4112;
+    --color-emerald-50: #0b2a21;
+    --color-emerald-100: #0f3a2d;
+    --color-emerald-200: #155a45;
+    --color-sky-50: #0b2334;
+    --color-sky-100: #0e3148;
+    --color-sky-200: #144866;
+
+    /* Cards, boxes and menus */
+    --surface: #111a2b;
+  }
+
+  /* The sidebar is dark in both themes: its light blue text keeps its colours */
+  [data-theme="dark"] aside {
+    --color-brand-100: #d9ebff;
+    --color-brand-200: #b9dbff;
+  }
+
+  [data-theme="dark"] .bg-white {
+    background-color: var(--surface);
+  }
+  [data-theme="dark"] .bg-white\/80,
+  [data-theme="dark"] .bg-white\/90,
+  [data-theme="dark"] .bg-white\/95 {
+    background-color: color-mix(in oklab, var(--surface) 92%, transparent);
+  }
+  [data-theme="dark"] .hover\:bg-white:hover,
+  [data-theme="dark"] .focus\:bg-white:focus {
+    background-color: var(--surface);
+  }
+
+  /* Dark in both themes: the "Saving…" pill, and the shade behind dialogs and the phone menu */
+  [data-theme="dark"] .bg-slate-900 {
+    background-color: #1e293b;
+  }
+  [data-theme="dark"] :is(.bg-slate-900\/40, .bg-slate-900\/50) {
+    background-color: rgb(2 6 23 / 0.65);
+  }
+
+  /* Coloured text, readable on dark */
+  [data-theme="dark"] :is(.text-red-600, .text-red-500) {
+    color: #f87171;
+  }
+  [data-theme="dark"] :is(.text-red-700, .text-red-800, .text-red-900, .text-red-950) {
+    color: #fca5a5;
+  }
+  [data-theme="dark"] :is(.text-amber-600, .text-amber-700) {
+    color: #fbbf24;
+  }
+  [data-theme="dark"] :is(.text-amber-800, .text-amber-900, .text-amber-950) {
+    color: #fcd34d;
+  }
+  [data-theme="dark"] :is(.text-emerald-600, .text-emerald-700) {
+    color: #34d399;
+  }
+  [data-theme="dark"] :is(.text-emerald-800, .text-emerald-900) {
+    color: #6ee7b7;
+  }
+  [data-theme="dark"] :is(.text-sky-600, .text-sky-700) {
+    color: #38bdf8;
+  }
+  [data-theme="dark"] :is(.text-sky-800, .text-sky-900) {
+    color: #7dd3fc;
+  }
+  [data-theme="dark"] :is(.text-brand-600, .text-brand-700) {
+    color: #6cb6ff;
+  }
+  [data-theme="dark"] :is(.text-brand-800, .text-brand-900) {
+    color: #a3d0ff;
+  }
+  [data-theme="dark"] :is(.text-accent-700, .text-accent-800) {
+    color: #ffa463;
+  }
+  /* …but not on the blue table headings and buttons, which stay white-on-blue */
+  [data-theme="dark"] :is(.bg-brand-600, .bg-brand-700, .bg-brand-800) :is(.text-brand-700, .text-brand-800) {
+    color: inherit;
+  }
+}
+
 /*
  * Phones: table rows become cards (see StackBox in components/ui/table.tsx).
  * Each cell shows its column name (data-label) on the left and the value on the right;

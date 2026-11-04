@@ -7,17 +7,21 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Select } from "@/components/ui/form";
-import { Card, FilterTabs, PageHeader, SearchInput, TableFooter, Toolbar } from "@/components/ui/layout";
+import { Card, ClearFilters, FilterTabs, PageHeader, SearchInput, SummaryTile, TableFooter, Toolbar } from "@/components/ui/layout";
 import { Pagination, usePagination } from "@/components/ui/pagination";
 import { EmptyRow, GroupRow, RowActions, Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { categoryOf, compareByCategory } from "@/lib/categories";
 import { useAppStore, useCategoryRanks, useItemMap } from "@/lib/store";
-import type { StockRecord } from "@/lib/types";
+import type { Item, StockRecord } from "@/lib/types";
 import { useDialog } from "@/lib/use-dialog";
-import { cn, formatDate, formatQty, includesText, LOW_STOCK_LEVEL } from "@/lib/utils";
+import { cn, formatDate, formatMoney, formatQty, includesText, LOW_STOCK_LEVEL, round2 } from "@/lib/utils";
+import { ItemFormDialog } from "@/components/items/item-form-dialog";
 import { IssueStockDialog, StockFormDialog } from "./stock-dialogs";
 
-type LevelFilter = "all" | "low";
+type LevelFilter = "all" | "low" | "noCost";
+
+/** In the store but no cost price on the item, so it adds nothing to the stock value */
+const missingCost = (r: StockRecord, item?: Item) => r.availableQty > 0 && !item?.costPrice;
 
 export function StockPage() {
   const stock = useAppStore((s) => s.stock);
@@ -33,11 +37,13 @@ export function StockPage() {
   const form = useDialog<StockRecord | "new">();
   const issue = useDialog<StockRecord>();
   const remove = useDialog<StockRecord>();
+  const editItem = useDialog<Item>();
 
   const lowCount = stock.filter((r) => r.availableQty <= LOW_STOCK_LEVEL).length;
+  const noCostCount = stock.filter((r) => missingCost(r, itemMap.get(r.sapCode))).length;
   const rows = stock
     .filter((r) => !location || r.locationNumber === location)
-    .filter((r) => level === "all" || r.availableQty <= LOW_STOCK_LEVEL)
+    .filter((r) => level === "all" || (level === "low" ? r.availableQty <= LOW_STOCK_LEVEL : missingCost(r, itemMap.get(r.sapCode))))
     .filter((r) => !category || categoryOfRow(r) === category)
     .filter((r) => {
       const item = itemMap.get(r.sapCode);
@@ -54,6 +60,16 @@ export function StockPage() {
 
   const totalAvailable = rows.reduce((sum, r) => sum + r.availableQty, 0);
   const totalIssued = rows.reduce((sum, r) => sum + r.issuedQty, 0);
+  // Stock value at cost (what Raigam is paid) and at wholesale (what it sells for)
+  const costValue = (r: StockRecord) => round2(r.availableQty * (itemMap.get(r.sapCode)?.costPrice ?? 0));
+  const totalCost = round2(rows.reduce((sum, r) => sum + costValue(r), 0));
+  const totalWholesale = round2(rows.reduce((sum, r) => sum + r.availableQty * (itemMap.get(r.sapCode)?.wholesalePrice ?? 0), 0));
+  const itemsInView = new Set(rows.map((r) => r.sapCode)).size;
+  const locationsInView = new Set(rows.map((r) => r.locationNumber)).size;
+  const outOfStock = rows.filter((r) => r.availableQty <= 0).length;
+  const lowInView = rows.filter((r) => r.availableQty > 0 && r.availableQty <= LOW_STOCK_LEVEL);
+  const noCost = rows.filter((r) => missingCost(r, itemMap.get(r.sapCode))).length;
+  const filtered = !!(query || location || category || level !== "all");
 
   const pager = usePagination(rows, [query, location, level, category]);
 
@@ -69,10 +85,52 @@ export function StockPage() {
         }
       />
 
+      <div className="mb-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <SummaryTile
+          label="Stock value"
+          value={formatMoney(totalCost)}
+          sub={
+            <>
+              At cost · {formatMoney(totalWholesale)} at wholesale
+              {noCost > 0 && (
+                <>
+                  {" · "}
+                  <button type="button" onClick={() => setLevel("noCost")} className="font-medium text-red-600 hover:underline">
+                    {noCost} with no cost price
+                  </button>
+                </>
+              )}
+            </>
+          }
+        />
+        <SummaryTile
+          label="Units in stock"
+          value={formatQty(totalAvailable)}
+          sub={`${formatQty(itemsInView)} item${itemsInView === 1 ? "" : "s"} · ${formatQty(locationsInView)} location${locationsInView === 1 ? "" : "s"}${filtered ? " · in this view" : ""}`}
+        />
+        <SummaryTile
+          label="Low stock"
+          value={formatQty(lowInView.length)}
+          tone={lowInView.length ? "danger" : "default"}
+          sub={`1 to ${LOW_STOCK_LEVEL} left · ${formatMoney(round2(lowInView.reduce((sum, r) => sum + costValue(r), 0)))} at cost`}
+        />
+        <SummaryTile
+          label="Out of stock"
+          value={formatQty(outOfStock)}
+          tone={outOfStock ? "danger" : "default"}
+          sub={`${formatQty(totalIssued)} units issued in total`}
+        />
+      </div>
+
       <Card>
         <Toolbar>
           <SearchInput placeholder="Search SAP code or description" value={query} onChange={(e) => setQuery(e.target.value)} />
-          <Select value={location} onChange={(e) => setLocation(e.target.value)} className="h-9 sm:w-52" aria-label="Filter by location">
+          <Select
+            value={location}
+            onChange={(e) => setLocation(e.target.value)}
+            className={cn("h-9 sm:w-52", location && "border-brand-500 bg-brand-50 font-medium text-brand-800")}
+            aria-label="Filter by location"
+          >
             <option value="">All locations</option>
             {locations.map((l) => (
               <option key={l.id} value={l.locationNumber}>
@@ -80,7 +138,12 @@ export function StockPage() {
               </option>
             ))}
           </Select>
-          <Select value={category} onChange={(e) => setCategory(e.target.value)} className="h-9 sm:w-52" aria-label="Filter by category">
+          <Select
+            value={category}
+            onChange={(e) => setCategory(e.target.value)}
+            className={cn("h-9 sm:w-52", category && "border-brand-500 bg-brand-50 font-medium text-brand-800")}
+            aria-label="Filter by category"
+          >
             <option value="">All categories</option>
             {[...ranks.keys()].map((name) => (
               <option key={name} value={name}>
@@ -88,6 +151,15 @@ export function StockPage() {
               </option>
             ))}
           </Select>
+          <ClearFilters
+            active={!!(query || location || category || level !== "all")}
+            onClear={() => {
+              setQuery("");
+              setLocation("");
+              setCategory("");
+              setLevel("all");
+            }}
+          />
           <div className="sm:ml-auto">
             <FilterTabs<LevelFilter>
               value={level}
@@ -95,6 +167,7 @@ export function StockPage() {
               options={[
                 { value: "all", label: "All", count: stock.length },
                 { value: "low", label: "Low stock", count: lowCount },
+                { value: "noCost", label: "No cost price", count: noCostCount },
               ]}
             />
           </div>
@@ -108,6 +181,12 @@ export function StockPage() {
               <TH>Store Location</TH>
               <TH className="text-right">Available QTY</TH>
               <TH className="text-right">Issued</TH>
+              <TH className="text-right" title="What Raigam is paid per unit">
+                Cost Price
+              </TH>
+              <TH className="text-right" title="Available qty × cost price">
+                Stock Value
+              </TH>
               <TH>Last Update</TH>
               <TH className="w-32">
                 <span className="sr-only">Actions</span>
@@ -115,7 +194,7 @@ export function StockPage() {
             </tr>
           </THead>
           <TBody>
-            {rows.length === 0 && <EmptyRow colSpan={8}>No stock records found.</EmptyRow>}
+            {rows.length === 0 && <EmptyRow colSpan={10}>{level === "noCost" ? "Every item in the store has a cost price." : "No stock records found."}</EmptyRow>}
             {pager.pageRows.map((r, i) => {
               const item = itemMap.get(r.sapCode);
               const low = r.availableQty <= LOW_STOCK_LEVEL;
@@ -123,7 +202,7 @@ export function StockPage() {
                 <Fragment key={r.id}>
                   {/* A category heading where it starts, and on top of each page */}
                   {(i === 0 || categoryOfRow(r) !== categoryOfRow(pager.pageRows[i - 1])) && (
-                    <GroupRow colSpan={8}>
+                    <GroupRow colSpan={10}>
                       {categoryOfRow(r)} <span className="font-normal text-slate-500 normal-case">· {perCategory.get(categoryOfRow(r))?.length ?? 0} records</span>
                     </GroupRow>
                   )}
@@ -145,6 +224,23 @@ export function StockPage() {
                       )}
                     </TD>
                     <TD className="text-right tabular-nums">{formatQty(r.issuedQty)}</TD>
+                    <TD className="text-right tabular-nums">
+                      {item?.costPrice ? (
+                        formatMoney(item.costPrice)
+                      ) : item && missingCost(r, item) ? (
+                        <button
+                          type="button"
+                          onClick={() => editItem.open(item)}
+                          title="No cost price, so this stock isn't in the stock value. Set it on the item."
+                          className="inline-flex items-center rounded-full bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700 ring-1 ring-red-200 hover:bg-red-100"
+                        >
+                          No cost · Set
+                        </button>
+                      ) : (
+                        "—"
+                      )}
+                    </TD>
+                    <TD className="text-right font-semibold text-slate-900 tabular-nums">{formatMoney(costValue(r))}</TD>
                     <TD className="tabular-nums">{formatDate(r.lastUpdate)}</TD>
                     <TD>
                       <RowActions>
@@ -180,12 +276,14 @@ export function StockPage() {
           </TBody>
         </Table>
         <TableFooter pager={<Pagination pager={pager} />}>
-          {rows.length} records · {formatQty(totalAvailable)} available · {formatQty(totalIssued)} issued
+          {rows.length} records · {formatQty(totalAvailable)} available · {formatQty(totalIssued)} issued ·{" "}
+          <span className="font-semibold text-slate-900">{formatMoney(totalCost)}</span> stock value
         </TableFooter>
       </Card>
 
       <StockFormDialog open={form.isOpen} record={form.target === "new" ? null : form.target} onClose={form.close} />
       <IssueStockDialog open={issue.isOpen} record={issue.target} onClose={issue.close} />
+      <ItemFormDialog open={editItem.isOpen} item={editItem.target} onClose={editItem.close} />
       <ConfirmDialog
         open={remove.isOpen}
         onClose={remove.close}

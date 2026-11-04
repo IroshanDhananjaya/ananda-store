@@ -11,7 +11,7 @@ import { Button, buttonClass } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { DateRangePicker, type DateRange } from "@/components/ui/date-range-picker";
 import { Select } from "@/components/ui/form";
-import { Card, FilterTabs, PageHeader, SearchInput, SummaryTile, TableFooter, Toolbar } from "@/components/ui/layout";
+import { Card, ClearFilters, FilterTabs, PageHeader, SearchInput, SummaryTile, TableFooter, Toolbar } from "@/components/ui/layout";
 import { Pagination, usePagination } from "@/components/ui/pagination";
 import { EmptyRow, RowActions, Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import type { SaleDue } from "@/lib/ledger";
@@ -353,20 +353,18 @@ function InvoicesPage({
           <SummaryTile label="Return %" value={formatPct(rate.pct, rate.sold)} sub={`${returnSplit(rate)} · ${formatMoney(rate.returned)} returned`} />
         </div>
 
-        <div className="mt-6 print:hidden">
-          <FilterTabs<View>
-            value={view}
-            onChange={setView}
-            options={[
-              { value: "invoices", label: "Invoices", count: rows.length },
-              { value: "items", label: "Loading list (item totals)", count: itemCount },
-            ]}
-          />
-        </div>
-
-        <Card className="mt-3">
+        <Card className="mt-4">
           <div className="print:hidden">
             <Toolbar>
+              <FilterTabs<View>
+                value={view}
+                onChange={setView}
+                options={[
+                  { value: "invoices", label: "Invoices", count: rows.length },
+                  { value: "items", label: "Loading list (item totals)", count: itemCount },
+                ]}
+              />
+              <span className="hidden h-6 w-px bg-slate-300 lg:block" aria-hidden />
               <FilterTabs<Preset>
                 value={preset}
                 onChange={choosePreset}
@@ -391,11 +389,16 @@ function InvoicesPage({
             </Toolbar>
             <Toolbar>
               {view === "items" ? (
-                <SearchInput placeholder="Search item…" value={itemQuery} onChange={(e) => setItemQuery(e.target.value)} />
+                <SearchInput placeholder="Search item…" value={itemQuery} onChange={(e) => setItemQuery(e.target.value)} className="sm:max-w-60" />
               ) : (
-                <SearchInput placeholder="Search bill, Raigam invoice, store or rep" value={query} onChange={(e) => setQuery(e.target.value)} />
+                <SearchInput placeholder="Search bill, invoice, store, rep" value={query} onChange={(e) => setQuery(e.target.value)} className="sm:max-w-60" />
               )}
-              <Select value={routeId} onChange={(e) => chooseRoute(e.target.value)} className="h-9 sm:w-56" aria-label="Filter by route">
+              <Select
+                value={routeId}
+                onChange={(e) => chooseRoute(e.target.value)}
+                className={cn("h-9 sm:w-44", routeId && "border-brand-500 bg-brand-50 font-medium text-brand-800")}
+                aria-label="Filter by route"
+              >
                 <option value="">All routes</option>
                 {routes.map((r) => (
                   <option key={r.id} value={r.id}>
@@ -403,7 +406,12 @@ function InvoicesPage({
                   </option>
                 ))}
               </Select>
-              <Select value={shopId} onChange={(e) => setShopId(e.target.value)} className="h-9 sm:w-64" aria-label="Filter by store">
+              <Select
+                value={shopId}
+                onChange={(e) => setShopId(e.target.value)}
+                className={cn("h-9 sm:w-52", shopId && "border-brand-500 bg-brand-50 font-medium text-brand-800")}
+                aria-label="Filter by store"
+              >
                 <option value="">{route ? `All stores on ${route.routeCode}` : "All stores"}</option>
                 {shopOptions.map((s) => (
                   <option key={s.id} value={s.id}>
@@ -412,7 +420,12 @@ function InvoicesPage({
                   </option>
                 ))}
               </Select>
-              <Select value={show} onChange={(e) => setShow(e.target.value as Show)} className="h-9 sm:w-56" aria-label="Show bills that are">
+              <Select
+                value={show}
+                onChange={(e) => setShow(e.target.value as Show)}
+                className={cn("h-9 sm:w-44", show !== "all" && "border-brand-500 bg-brand-50 font-medium text-brand-800")}
+                aria-label="Show bills that are"
+              >
                 <option value="all">{SHOW_LABELS.all}</option>
                 <optgroup label="Loading">
                   <option value="toLoad">{SHOW_LABELS.toLoad}</option>
@@ -428,6 +441,17 @@ function InvoicesPage({
                   <option value="checked">{SHOW_LABELS.checked}</option>
                 </optgroup>
               </Select>
+              <ClearFilters
+                active={!!(routeId || shopId || show !== "all" || kind !== "all" || (view === "items" ? itemQuery : query))}
+                onClear={() => {
+                  setRouteId("");
+                  setShopId("");
+                  setShow("all");
+                  setKind("all");
+                  setQuery("");
+                  setItemQuery("");
+                }}
+              />
               {view === "invoices" && chosen.length > 0 && (
                 <span className="flex items-center gap-1 text-sm text-slate-600">
                   {plural(chosen.length, "bill")} ticked
