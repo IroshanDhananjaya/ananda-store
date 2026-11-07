@@ -126,6 +126,8 @@ export type Actions = {
   saveOrderInvoice: (id: string, invoiceId: string | null, input: OrderInvoiceInput) => Result;
   /** The goods came: the received date, the Raigam invoices they came on and each item's count. Items already in stock can't change. */
   receiveOrder: (id: string, input: ReceiveOrderInput) => Result;
+  /** Move one received item to another of the order's invoices (it was saved on the wrong one). Not once it's in stock. */
+  moveOrderLine: (id: string, lineId: string, invoiceId: string) => Result;
   /**
    * Adds received quantities to stock, all at once or a few items at a time: `locationByLine` maps
    * OrderItem.id -> location number for the items to add now. `priceByLine` maps OrderItem.id -> price
@@ -239,6 +241,7 @@ export const ACTION_NAMES = [
   "payOrder",
   "saveOrderInvoice",
   "receiveOrder",
+  "moveOrderLine",
   "postOrderToStock",
   "reverseOrderPosting",
   "receiveLoad",
@@ -1043,6 +1046,21 @@ export const createCore =
         orderItems: nextItems,
         orders: orders.map((o) => (o.id === id ? totalled(received, nextInvoices, nextItems) : o)),
       });
+      return ok(id);
+    },
+    moveOrderLine: (id, lineId, invoiceId) => {
+      const { orders, orderInvoices, orderItems } = get();
+      const order = orders.find((o) => o.id === id);
+      if (!order) return fail("Order not found.");
+      const line = orderItems.find((l) => l.id === lineId && l.orderId === order.orderId);
+      if (!line) return fail("That item isn't on this order any more. Reload the page.");
+      if (!orderInvoices.some((i) => i.id === invoiceId && i.orderId === order.orderId)) return fail("That invoice isn't on this order any more. Reload the page.");
+      if (!line.invoiceId) return fail(`${line.itemCode} is Missing: put it on an invoice with Edit receiving.`);
+      if (line.postedLocation) return fail(`${line.itemCode} is already in stock, so its invoice can't change. Reverse the posting first.`);
+      if (line.invoiceId === invoiceId) return ok(id);
+      // Each invoice has its own discount %, so the bill total follows
+      const nextItems = orderItems.map((l) => (l.id === lineId ? { ...l, invoiceId } : l));
+      set({ orderItems: nextItems, orders: orders.map((o) => (o.id === id ? totalled(o, orderInvoices, nextItems) : o)) });
       return ok(id);
     },
     postOrderToStock: (id, locationByLine, priceByLine = {}) => {

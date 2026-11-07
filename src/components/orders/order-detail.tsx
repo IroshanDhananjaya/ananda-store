@@ -7,6 +7,7 @@ import { useMemo, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { LineStatusBadge, OrderStatusBadge } from "@/components/ui/badge";
 import { Button, buttonClass } from "@/components/ui/button";
+import { Select } from "@/components/ui/form";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { BackLink, Card, CardHeader, Detail, FilterTabs } from "@/components/ui/layout";
 import { StickyHeader } from "@/components/ui/sticky-header";
@@ -58,6 +59,7 @@ export function OrderDetail({ id }: { id: string }) {
   const orderInvoices = useAppStore((s) => s.orderInvoices);
   const deleteOrder = useAppStore((s) => s.deleteOrder);
   const reverseOrderPosting = useAppStore((s) => s.reverseOrderPosting);
+  const moveOrderLine = useAppStore((s) => s.moveOrderLine);
   const itemMap = useItemMap();
   const dialog = useDialog<Dialog>();
   // The invoice being edited (null = adding one), and the items to add to stock (left out = all)
@@ -102,6 +104,13 @@ export function OrderDetail({ id }: { id: string }) {
   function openInvoice(invoice: OrderInvoice | null) {
     setInvoiceTarget(invoice);
     dialog.open("invoice");
+  }
+
+  async function moveLine(lineId: string, itemCode: string, invoiceId: string) {
+    const result = await moveOrderLine(id, lineId, invoiceId);
+    if (!result.ok) return void toast.error(result.error);
+    const to = invoiceOf.get(invoiceId);
+    toast.success(`${itemCode} moved to ${to ? invoiceName(to.invoice, to.n) : "the invoice"}`);
   }
 
   function openPost(only?: string[]) {
@@ -386,7 +395,30 @@ export function OrderDetail({ id }: { id: string }) {
                         <span className="block text-xs font-normal text-slate-500">{itemMap.get(l.itemCode)?.uom}</span>
                       </TD>
                       <TD className="text-right tabular-nums">{l.orderedQty ? formatQty(l.orderedQty) : "—"}</TD>
-                      {received && <TD className="whitespace-nowrap">{inv ? inv.invoice.invoiceNumber || `Invoice ${inv.n + 1}` : <span className="text-slate-400">—</span>}</TD>}
+                      {received && (
+                        <TD className="whitespace-nowrap">
+                          {/* On an invoice and not in stock yet: it can move to another of the order's invoices */}
+                          {inv && !l.postedLocation && perInvoice.length > 1 ? (
+                            <Select
+                              value={l.invoiceId}
+                              onChange={(e) => moveLine(l.id, l.itemCode, e.target.value)}
+                              className="h-8 w-auto min-w-28 py-0 text-sm"
+                              aria-label={`Invoice ${l.itemCode} came on`}
+                              title="Change the invoice this item came on"
+                            >
+                              {perInvoice.map(({ invoice, n }) => (
+                                <option key={invoice.id} value={invoice.id}>
+                                  {invoice.invoiceNumber || `Invoice ${n + 1}`}
+                                </option>
+                              ))}
+                            </Select>
+                          ) : inv ? (
+                            inv.invoice.invoiceNumber || `Invoice ${inv.n + 1}`
+                          ) : (
+                            <span className="text-slate-400">—</span>
+                          )}
+                        </TD>
+                      )}
                       {received && <TD className="text-right tabular-nums">{l.invoiceId ? formatQty(l.invoicedQty) : "—"}</TD>}
                       <TD className="text-right tabular-nums">
                         {received ? formatQty(l.receivedQty) : "—"}

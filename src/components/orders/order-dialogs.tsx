@@ -1,7 +1,7 @@
 "use client";
 
 import { ClipboardCheck, Plus, X } from "lucide-react";
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { toast } from "sonner";
 import { LineStatusBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -253,7 +253,40 @@ type ReceiveRow = {
 };
 
 /** Rows shown: everything, one invoice's items, or the missing ones */
-type RowFilter = "all" | "missing" | `inv:${string}`;
+type RowFilter = "all" | "missing" | "unchecked" | `inv:${string}`;
+
+const tick = "size-4 cursor-pointer rounded accent-brand-600";
+
+/** Ticks while counting: kept in this browser per order, so closing the dialog doesn't lose them */
+function useCheckedRows(orderId: string) {
+  const storageKey = `receive-checked:${orderId}`;
+  const [checked, setChecked] = useState<Set<string>>(() => {
+    try {
+      const saved = localStorage.getItem(storageKey);
+      return new Set(saved ? (JSON.parse(saved) as string[]) : []);
+    } catch {
+      return new Set();
+    }
+  });
+  useEffect(() => {
+    try {
+      if (checked.size) localStorage.setItem(storageKey, JSON.stringify([...checked]));
+      else localStorage.removeItem(storageKey);
+    } catch {
+      // storage blocked: ticks just last while the dialog is open
+    }
+  }, [checked, storageKey]);
+  const setTicked = (keys: string[], on: boolean) =>
+    setChecked((prev) => {
+      const next = new Set(prev);
+      for (const k of keys) {
+        if (on) next.add(k);
+        else next.delete(k);
+      }
+      return next;
+    });
+  return { checked, setTicked };
+}
 
 function ReceiveForm({ order, lines, onDone }: { order: Order; lines: OrderItem[]; onDone: () => void }) {
   const orderInvoices = useAppStore((s) => s.orderInvoices);
@@ -293,15 +326,18 @@ function ReceiveForm({ order, lines, onDone }: { order: Order; lines: OrderItem[
   const [query, setQuery] = useState("");
   const [show, setShow] = useState<RowFilter>("all");
   const [error, setError] = useState<string>();
+  const { checked, setTicked } = useCheckedRows(order.id);
 
   const valueOf = (r: ReceiveRow) => (r.invoiceKey ? round2(toNumber(r.invoicedQty) * toNumber(r.unitPrice) - r.discount) : 0);
   const rowsOn = (key: string) => rows.filter((r) => r.invoiceKey === key);
   const sumOf = (key: string) => round2(rowsOn(key).reduce((sum, r) => sum + valueOf(r), 0));
   const billTotal = round2(invoices.reduce((sum, i) => sum + invoiceDiscount(sumOf(i.key), toNumber(i.discountPercent)).total, 0));
   const missing = rows.filter((r) => !r.invoiceKey);
+  const checkedCount = rows.filter((r) => checked.has(r.key)).length;
   const visible = rows.filter(
     (r) =>
-      (show === "all" || (show === "missing" ? !r.invoiceKey : `inv:${r.invoiceKey}` === show)) &&
+      (show === "all" ||
+        (show === "missing" ? !r.invoiceKey : show === "unchecked" ? !checked.has(r.key) : `inv:${r.invoiceKey}` === show)) &&
       includesText([r.itemCode, itemMap.get(r.itemCode)?.description], query),
   );
 
@@ -480,21 +516,35 @@ function ReceiveForm({ order, lines, onDone }: { order: Order; lines: OrderItem[
               { value: "all", label: "All", count: rows.length },
               ...invoices.map((i, n) => ({ value: `inv:${i.key}` as const, label: i.invoiceNumber.trim() || `Invoice ${n + 1}`, count: rowsOn(i.key).length })),
               { value: "missing", label: "Missing", count: missing.length },
+              { value: "unchecked", label: "Not checked", count: rows.length - checkedCount },
             ]}
           />
+          <span className={cn("text-sm tabular-nums sm:ml-auto", checkedCount === rows.length ? "font-medium text-emerald-700" : "text-slate-500")}>
+            Checked {checkedCount} of {rows.length}
+          </span>
         </div>
 
         <div className="overflow-x-auto rounded-lg border border-slate-200">
           <StackBox>
-            <table className="w-full min-w-[980px] text-sm">
+            <table className="w-full min-w-[1100px] text-sm">
               <thead className="bg-slate-50 text-left text-xs font-semibold tracking-wide text-slate-500 uppercase">
                 <tr>
+                  <th className="w-10 py-2 pr-1 pl-3">
+                    <input
+                      type="checkbox"
+                      className={tick}
+                      checked={visible.length > 0 && visible.every((r) => checked.has(r.key))}
+                      onChange={(e) => setTicked(visible.map((r) => r.key), e.target.checked)}
+                      aria-label="Tick all items shown"
+                      title="Tick all shown"
+                    />
+                  </th>
                   <th className="px-3 py-2">Item</th>
-                  <th className="px-3 py-2 text-right">Ordered</th>
-                  <th className="w-44 px-3 py-2">Invoice</th>
-                  <th className="w-24 px-3 py-2 text-right">On invoice</th>
-                  <th className="w-24 px-3 py-2 text-right">Received</th>
-                  <th className="w-28 px-3 py-2 text-right">Price (Rs.)</th>
+                  <th className="px-3 py-2 text-right whitespace-nowrap">Ordered</th>
+                  <th className="w-48 px-3 py-2">Invoice</th>
+                  <th className="w-32 px-3 py-2 text-right whitespace-nowrap">On invoice</th>
+                  <th className="w-32 px-3 py-2 text-right">Received</th>
+                  <th className="w-36 px-3 py-2 text-right whitespace-nowrap">Price (Rs.)</th>
                   <th className="px-3 py-2 text-right">Value</th>
                   <th className="px-3 py-2">Status</th>
                   <th className="px-3 py-2">Remarks</th>
@@ -506,7 +556,7 @@ function ReceiveForm({ order, lines, onDone }: { order: Order; lines: OrderItem[
               <tbody className="divide-y divide-slate-100">
                 {visible.length === 0 && (
                   <tr>
-                    <td colSpan={10} className="px-3 py-6 text-center text-slate-500">
+                    <td colSpan={11} className="px-3 py-6 text-center text-slate-500">
                       No items here.
                     </td>
                   </tr>
@@ -515,7 +565,19 @@ function ReceiveForm({ order, lines, onDone }: { order: Order; lines: OrderItem[
                   const status = lineStatus({ orderedQty: r.orderedQty, receivedQty: toNumber(r.receivedQty) }, { receivedDate: date });
                   const short = r.invoiceKey && toNumber(r.receivedQty) < toNumber(r.invoicedQty);
                   return (
-                    <tr key={r.key} className={cn(!r.invoiceKey && "bg-red-50/40", r.inStock && "opacity-70")}>
+                    <tr
+                      key={r.key}
+                      className={cn(!r.invoiceKey ? "bg-red-50/40" : checked.has(r.key) && "bg-emerald-50/60", r.inStock && "opacity-70")}
+                    >
+                      <td className="py-2 pr-1 pl-3">
+                        <input
+                          type="checkbox"
+                          className={tick}
+                          checked={checked.has(r.key)}
+                          onChange={(e) => setTicked([r.key], e.target.checked)}
+                          aria-label={`Checked ${r.itemCode}`}
+                        />
+                      </td>
                       <td className="px-3 py-2">
                         <span className="block font-medium text-slate-900">{itemMap.get(r.itemCode)?.description ?? r.itemCode}</span>
                         <span className="font-mono text-xs text-slate-500">{r.itemCode}</span>
@@ -549,7 +611,7 @@ function ReceiveForm({ order, lines, onDone }: { order: Order; lines: OrderItem[
                           placeholder={r.invoiceKey ? "" : "—"}
                           onChange={(e) => changeInvoiced(r, e.target.value)}
                           disabled={!r.invoiceKey || r.inStock}
-                          className="h-9 text-right tabular-nums"
+                          className="h-9 min-w-24 text-right tabular-nums"
                           aria-label={`Qty of ${r.itemCode} on the invoice`}
                         />
                       </td>
@@ -562,7 +624,7 @@ function ReceiveForm({ order, lines, onDone }: { order: Order; lines: OrderItem[
                           value={r.receivedQty}
                           onChange={(e) => update(r.key, { receivedQty: e.target.value })}
                           disabled={r.inStock}
-                          className={cn("h-9 text-right tabular-nums", short && "border-amber-400")}
+                          className={cn("h-9 min-w-24 text-right tabular-nums", short && "border-amber-400")}
                           aria-label={`Received quantity of ${r.itemCode}`}
                         />
                         {short && <span className="mt-1 block text-right text-xs text-amber-700">{formatQty(toNumber(r.invoicedQty) - toNumber(r.receivedQty))} short</span>}
@@ -576,11 +638,11 @@ function ReceiveForm({ order, lines, onDone }: { order: Order; lines: OrderItem[
                           value={r.unitPrice}
                           onChange={(e) => update(r.key, { unitPrice: e.target.value })}
                           disabled={!r.invoiceKey || r.inStock}
-                          className="h-9 text-right tabular-nums"
+                          className="h-9 min-w-24 text-right tabular-nums"
                           aria-label={`Price of ${r.itemCode} on the invoice`}
                         />
                       </td>
-                      <td className="px-3 py-2 text-right font-medium text-slate-900 tabular-nums">
+                      <td className="px-3 py-2 text-right font-medium whitespace-nowrap text-slate-900 tabular-nums">
                         {r.invoiceKey ? formatMoney(valueOf(r)) : "—"}
                         {r.discount > 0 && r.invoiceKey && <span className="block text-xs font-normal text-slate-500">less {formatMoney(r.discount)}</span>}
                       </td>
@@ -657,7 +719,7 @@ export function ReceiveOrderDialog({
     <Modal
       open={open}
       onClose={onClose}
-      size="xl"
+      size="full"
       title={`Receive ${order.orderId}`}
       description="When the goods came, the Raigam invoices they came on, and how much of each item arrived."
       footer={

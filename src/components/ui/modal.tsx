@@ -4,7 +4,14 @@ import { X } from "lucide-react";
 import { useEffect, useId, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
-const widths = { sm: "max-w-md", md: "max-w-xl", lg: "max-w-3xl", xl: "max-w-5xl" };
+const widths = {
+  sm: "max-w-md",
+  md: "max-w-xl",
+  lg: "max-w-3xl",
+  xl: "max-w-5xl",
+  // Opens like a page: the whole screen, no rounded edges
+  full: "h-dvh max-h-dvh max-w-none rounded-none sm:rounded-none",
+};
 
 /**
  * Rendered inline (not portalled) on purpose: when Next.js hides a route with
@@ -44,7 +51,7 @@ export function Modal({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center p-0 sm:items-center sm:p-4">
+    <div className={cn("fixed inset-0 z-50 flex items-end justify-center p-0 sm:items-center", size !== "full" && "sm:p-4")}>
       <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-[2px]" onClick={onClose} aria-hidden />
       <div
         role="dialog"
@@ -71,7 +78,7 @@ export function Modal({
             <X className="size-5" />
           </button>
         </div>
-        <div className="overflow-y-auto px-5 py-4">{children}</div>
+        <div className="flex-1 overflow-y-auto px-5 py-4">{children}</div>
         {footer && (
           <div className="flex flex-col-reverse gap-2 border-t border-slate-200 px-5 py-3 sm:flex-row sm:justify-end">
             {footer}
