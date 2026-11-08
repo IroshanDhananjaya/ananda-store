@@ -20,7 +20,7 @@ function Blank({ label, value, className }: { label: string; value?: string; cla
 
 /**
  * Printed cash sheet, as on Raigam's agency invoice list: one row per bill with boxes
- * to write in what was collected (cheque, credit, cash), the balance left, and a tick when done.
+ * to write in the bags given, what was collected (cheque, credit, cash) and the balance left.
  * Hidden on screen; shown only when printing.
  */
 export function CashSheet({
@@ -47,8 +47,8 @@ export function CashSheet({
   const total = rows.reduce((sum, s) => sum + dues.get(s.id)!.total, 0);
 
   return (
-    <div className="hidden text-[13px] text-black print:block">
-      <style>{"@page { size: A4 portrait; margin: 10mm; }"}</style>
+    <div className="hidden w-full text-[13px] text-black print:block">
+      <style>{"@page { size: A4 portrait; margin: 6mm; }"}</style>
 
       <header className="text-center">
         <h1 className="text-xl font-bold">Ananda Stores</h1>
@@ -67,49 +67,46 @@ export function CashSheet({
       <table className="w-full table-fixed border-collapse">
         <colgroup>
           <col className="w-[4%]" />
-          <col className="w-[13%]" />
-          <col className="w-[22%]" />
+          <col className="w-[26%]" />
           <col className="w-[12%]" />
           <col className="w-[10%]" />
-          <col className="w-[10%]" />
-          <col className="w-[10%]" />
-          <col className="w-[14%]" />
-          <col className="w-[5%]" />
+          <col className="w-[11%]" />
+          <col className="w-[11%]" />
+          <col className="w-[11%]" />
+          <col className="w-[15%]" />
         </colgroup>
         <thead>
           <tr className="bg-slate-200 text-left [print-color-adjust:exact]">
             <th className={cell}>No</th>
-            <th className={cell}>Invoice</th>
             <th className={cell}>Shop Name</th>
             <th className={cn(cell, "text-right")}>Bill Value</th>
+            <th className={cn(cell, "text-center")} title="Bags / packages given to the store">
+              Bags
+            </th>
             <th className={cell}>Cheque</th>
             <th className={cell}>Credit</th>
             <th className={cell}>Cash</th>
             <th className={cell}>Balance</th>
-            <th className={cn(cell, "text-center")} title="Done">
-              ✓
-            </th>
           </tr>
         </thead>
         <tbody>
           {rows.length === 0 && (
             <tr>
-              <td colSpan={9} className={cn(cell, "py-6 text-center")}>
+              <td colSpan={8} className={cn(cell, "py-6 text-center")}>
                 No invoices for these dates.
               </td>
             </tr>
           )}
           {rows.map((s, i) => {
             const d = dues.get(s.id)!;
-            const ref = [s.invoiceNo && s.saleNo, multiDay && formatDate(dateOf(s))].filter(Boolean).join(" · ");
+            const ref = [s.invoiceNo, s.saleNo, multiDay && formatDate(dateOf(s))].filter(Boolean).join(" · ");
             return (
               <tr key={s.id} className="h-[11mm] break-inside-avoid">
                 <td className={cn(cell, "text-center")}>{i + 1}</td>
                 <td className={cell}>
-                  <span className="block">{s.invoiceNo || s.saleNo}</span>
-                  {ref && <span className="block text-[10px] text-slate-600">{ref}</span>}
+                  <span className="block">{shopMap.get(s.shopId)?.shopName ?? "Deleted store"}</span>
+                  <span className="block text-[10px] text-slate-600">{ref}</span>
                 </td>
-                <td className={cell}>{shopMap.get(s.shopId)?.shopName ?? "Deleted store"}</td>
                 <td className={cn(cell, "text-right tabular-nums")}>
                   <span className="block">{amount(d.total)}</span>
                   {d.paid > 0 && <span className="block text-[10px] text-slate-600">paid {amount(d.paid)}</span>}
@@ -118,9 +115,7 @@ export function CashSheet({
                 <td className={cell} />
                 <td className={cell} />
                 <td className={cell} />
-                <td className={cn(cell, "text-center")}>
-                  <span className="inline-block size-[5mm] border-[1.5px] border-slate-800 align-middle" />
-                </td>
+                <td className={cell} />
               </tr>
             );
           })}
@@ -128,7 +123,7 @@ export function CashSheet({
         {rows.length > 0 && (
           <tfoot className="[display:table-row-group]">
             <tr className="h-[11mm] break-inside-avoid font-bold">
-              <td colSpan={3} className={cn(cell, "text-right")}>
+              <td colSpan={2} className={cn(cell, "text-right")}>
                 Total ({rows.length} invoice{rows.length === 1 ? "" : "s"})
               </td>
               <td className={cn(cell, "text-right tabular-nums")}>{amount(total)}</td>

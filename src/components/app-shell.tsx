@@ -413,7 +413,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           </span>
         </header>
 
-        <main className="w-full min-w-0 flex-1 px-4 py-4 sm:px-5 lg:px-6 lg:py-5">
+        <main className="w-full min-w-0 flex-1 px-4 py-4 sm:px-5 lg:px-6 lg:py-5 print:p-0">
           {loaded ? (
             <>
               {/* Raigam cheques about to be deposited, on every page */}
