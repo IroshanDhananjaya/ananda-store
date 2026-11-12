@@ -18,7 +18,18 @@ import { migrate as runMigrations } from "drizzle-orm/postgres-js/migrator";
 import { connect } from "../src/db/connect";
 import { applyAction, fetchData, replaceAll } from "../src/db/repo";
 import { DATA_KEYS, emptyData, seedData, type Data } from "../src/lib/core";
-import type { ItemInput, Order, OrderInput, OrderInvoice, OrderLineInput, ReceiveLoadInput, ReceiveOrderInput, StoreLocation } from "../src/lib/types";
+import type {
+  ItemInput,
+  LoadInvoiceInput,
+  LoadLineInput,
+  Order,
+  OrderInput,
+  OrderInvoice,
+  OrderLineInput,
+  ReceiveLoadInput,
+  ReceiveOrderInput,
+  StoreLocation,
+} from "../src/lib/types";
 import {
   formatDate,
   formatMoney,
@@ -284,7 +295,7 @@ async function importLoad() {
   // Stock and cost prices as they'll be after each load, for the preview
   const stockQty = new Map(stock.map((r) => [`${r.sapCode}|${r.locationNumber}`, r.availableQty]));
   const costPrice = new Map(items.map((i) => [i.sapCode, i.costPrice]));
-  const loads: ReceiveLoadInput[] = [];
+  const loads: (Pick<ReceiveLoadInput, "deliveryDate"> & LoadInvoiceInput)[] = [];
   const preview: string[] = [];
   const problems: string[] = [];
 
@@ -305,7 +316,7 @@ async function importLoad() {
     if (lineRows.length === 0) problem("no items");
 
     const seen = new Set<string>();
-    const lines: ReceiveLoadInput["lines"] = [];
+    const lines: LoadLineInput[] = [];
     lineRows.forEach((l, i) => {
       const itemCode = String(l?.itemCode ?? "").trim().toUpperCase();
       const at = `item ${i + 1}${itemCode ? ` (${itemCode})` : ""}`;

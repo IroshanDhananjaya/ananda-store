@@ -59,6 +59,7 @@ import {
   type DeliveryInput,
   type LoadInput,
   type OrderItemInput,
+  type LoadInvoiceInput,
   type ReceiveLoadInput,
   type ReceiveOrderInput,
 } from "./types";
@@ -1149,55 +1150,74 @@ export const createCore =
     },
     receiveLoad: (input) => {
       const { orders, orderInvoices, items, locations } = get();
-      const invoiceNumber = input.invoiceNumber.trim();
-      if (!invoiceNumber) return fail("Enter the invoice number.");
-      const dup = duplicateInvoice(orderInvoices, invoiceNumber);
-      if (dup) return fail(`Invoice ${invoiceNumber} is already entered on ${dup.orderId}.`);
+      // One invoice on its own, as older screens and imports send it
+      const loadInvoices: LoadInvoiceInput[] = "invoices" in input ? input.invoices : [input];
+      if (!Array.isArray(loadInvoices) || loadInvoices.length === 0) return fail("Add at least one invoice.");
       if (!input.deliveryDate) return fail("Enter the delivery date.");
-      const discountPercent = round2(input.discountPercent || 0);
-      const pctErr = validateDiscountPercent(discountPercent);
-      if (pctErr) return fail(pctErr);
       const payment = input.payment ?? NOT_PAID;
       const payErr = validateOrderPayment(payment);
       if (payErr) return fail(payErr);
-      if (input.lines.length === 0) return fail("Add at least one item.");
-      const seen = new Set<string>();
-      // Each line goes to the stock location set on its item
-      const locationOf = new Map(items.map((i) => [i.sapCode, i.locationNumber]));
-      for (const l of input.lines) {
-        if (!locationOf.has(l.itemCode)) return fail(`Unknown item "${l.itemCode}".`);
-        if (seen.has(l.itemCode)) return fail(`${l.itemCode} is added more than once.`);
-        seen.add(l.itemCode);
-        if (!Number.isInteger(l.qty) || l.qty <= 0) return fail(`Quantity for ${l.itemCode} must be a whole number above 0.`);
-        const err = validatePrice(l.itemCode, l.qty, l.unitPrice, l.discount);
-        if (err) return fail(err);
-        if (!locations.some((x) => x.locationNumber === locationOf.get(l.itemCode)))
-          return fail(`${l.itemCode} has no stock location. Set it on the item first.`);
-      }
+      const several = loadInvoices.length > 1;
 
       const orderId = nextOrderId(orders);
-      const invoice: OrderInvoice = {
-        id: newId(),
-        orderId,
-        invoiceNumber,
-        poNumber: input.poNumber.trim(),
-        company: (input.company ?? "").trim(),
-        invoiceDate: input.deliveryDate,
-        discountPercent,
-      };
-      const lines: OrderItem[] = input.lines.map((l) => ({
-        id: newId(),
-        orderId,
-        itemCode: l.itemCode,
-        orderedQty: l.qty,
-        invoiceId: invoice.id,
-        invoicedQty: l.qty,
-        receivedQty: l.qty,
-        unitPrice: round2(l.unitPrice),
-        discount: round2(l.discount),
-        remarks: "",
-        postedLocation: locationOf.get(l.itemCode)!,
-      }));
+      // Each line goes to the stock location set on its item
+      const locationOf = new Map(items.map((i) => [i.sapCode, i.locationNumber]));
+      const invoices: OrderInvoice[] = [];
+      const lines: OrderItem[] = [];
+      // Cost price = net price per unit after the line discount and its invoice's discount (free items, price 0, leave it alone)
+      const netCost = new Map<string, number>();
+      // An order holds each item once, so one item can't be on two of the load's invoices
+      const invoiceOfItem = new Map<string, string>();
+      for (const inv of loadInvoices) {
+        const invoiceNumber = (inv.invoiceNumber ?? "").trim();
+        if (!invoiceNumber) return fail(several ? "Enter the number of every invoice." : "Enter the invoice number.");
+        if (invoices.some((i) => i.invoiceNumber.toUpperCase() === invoiceNumber.toUpperCase())) return fail(`Invoice ${invoiceNumber} is entered twice.`);
+        const dup = duplicateInvoice(orderInvoices, invoiceNumber);
+        if (dup) return fail(`Invoice ${invoiceNumber} is already entered on ${dup.orderId}.`);
+        const discountPercent = round2(inv.discountPercent || 0);
+        const pctErr = validateDiscountPercent(discountPercent);
+        if (pctErr) return fail(several ? `Invoice ${invoiceNumber}: ${pctErr}` : pctErr);
+        if (!Array.isArray(inv.lines) || inv.lines.length === 0) return fail(several ? `Invoice ${invoiceNumber} has no items.` : "Add at least one item.");
+
+        const invoice: OrderInvoice = {
+          id: newId(),
+          orderId,
+          invoiceNumber,
+          poNumber: (inv.poNumber ?? "").trim(),
+          company: (inv.company ?? "").trim(),
+          invoiceDate: input.deliveryDate,
+          discountPercent,
+        };
+        invoices.push(invoice);
+        for (const l of inv.lines) {
+          if (!locationOf.has(l.itemCode)) return fail(`Unknown item "${l.itemCode}".`);
+          const first = invoiceOfItem.get(l.itemCode);
+          if (first === invoiceNumber) return fail(`${l.itemCode} is added more than once.`);
+          if (first !== undefined)
+            return fail(`${l.itemCode} is on invoice ${first} and invoice ${invoiceNumber}. A load holds each item once: save one of them as a load of its own.`);
+          invoiceOfItem.set(l.itemCode, invoiceNumber);
+          if (!Number.isInteger(l.qty) || l.qty <= 0) return fail(`Quantity for ${l.itemCode} must be a whole number above 0.`);
+          const err = validatePrice(l.itemCode, l.qty, l.unitPrice, l.discount);
+          if (err) return fail(err);
+          const location = locationOf.get(l.itemCode)!;
+          if (!locations.some((x) => x.locationNumber === location)) return fail(`${l.itemCode} has no stock location. Set it on the item first.`);
+          lines.push({
+            id: newId(),
+            orderId,
+            itemCode: l.itemCode,
+            orderedQty: l.qty,
+            invoiceId: invoice.id,
+            invoicedQty: l.qty,
+            receivedQty: l.qty,
+            unitPrice: round2(l.unitPrice),
+            discount: round2(l.discount),
+            remarks: "",
+            postedLocation: location,
+          });
+          if (l.unitPrice > 0) netCost.set(l.itemCode, netUnitCost({ qty: l.qty, unitPrice: l.unitPrice, discount: l.discount }, discountPercent));
+        }
+      }
+
       const order = totalled(
         {
           id: newId(),
@@ -1211,24 +1231,18 @@ export const createCore =
           territory: "",
           requiredDate: "",
         },
-        [invoice],
+        invoices,
         lines,
       );
       const stock = receiveIntoStock(
         get().stock,
-        input.lines.map((l) => ({ sapCode: l.itemCode, locationNumber: locationOf.get(l.itemCode)!, qty: l.qty })),
+        lines.map((l) => ({ sapCode: l.itemCode, locationNumber: l.postedLocation!, qty: l.receivedQty })),
         getToday(),
-      );
-      // Cost price = net price per unit after the line and invoice discounts (free items, price 0, leave it alone)
-      const netCost = new Map(
-        lines
-          .filter((l) => l.unitPrice > 0)
-          .map((l) => [l.itemCode, netUnitCost({ qty: l.receivedQty, unitPrice: l.unitPrice, discount: l.discount }, discountPercent)]),
       );
 
       set((s) => ({
         orders: [...s.orders, order],
-        orderInvoices: [...s.orderInvoices, invoice],
+        orderInvoices: [...s.orderInvoices, ...invoices],
         orderItems: [...s.orderItems, ...lines],
         stock,
         items: s.items.map((i) => (netCost.has(i.sapCode) ? { ...i, costPrice: netCost.get(i.sapCode)! } : i)),

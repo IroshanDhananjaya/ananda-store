@@ -451,21 +451,28 @@ export type LoadInput = {
   /** Bill line id -> units not in the store (not loaded, not charged); left out = none */
   missing?: Record<string, number>;
 };
-/** A load arriving from Raigam with its invoice: saved as a received order and added to stock */
-export type ReceiveLoadInput = {
+/** One item of a load; it goes into stock at its item's location */
+export type LoadLineInput = { itemCode: string; qty: number; unitPrice: number; discount: number };
+/** One Raigam invoice a load came on, with its items */
+export type LoadInvoiceInput = {
   invoiceNumber: string;
   poNumber: string;
   /** The Raigam company that billed it; left out = not entered */
   company?: string;
+  /** "Discount % for Total Invoice", taken off this invoice's lines total */
+  discountPercent: number;
+  lines: LoadLineInput[];
+};
+/**
+ * A load arriving from Raigam on one or more invoices: saved as one received order and added to stock.
+ * One invoice can also be sent on its own (as older screens and `pnpm db` imports do).
+ */
+export type ReceiveLoadInput = {
   /** ISO date the load arrived */
   deliveryDate: string;
-  /** "Discount % for Total Invoice", taken off the lines total */
-  discountPercent: number;
-  /** Each line goes into stock at its item's location */
-  lines: { itemCode: string; qty: number; unitPrice: number; discount: number }[];
   /** How the bill was paid; left out = not paid yet */
   payment?: OrderPayment;
-};
+} & ({ invoices: LoadInvoiceInput[] } | LoadInvoiceInput);
 /** Money collected when delivering, and which bills it pays */
 export type CollectionInput = Pick<Payment, "amount" | "method" | "chequeNumber" | "chequeDate" | "chequeCollectedDate" | "reference" | "allocations">;
 export type DeliveryInput = {

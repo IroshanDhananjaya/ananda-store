@@ -61,7 +61,7 @@ export function ReceiveLoad() {
       <BackLink href="/orders">Purchase Orders</BackLink>
       <PageHeader
         title="Receive new load"
-        description="A load arrived from Raigam: enter its invoice and items. It is saved as a received purchase order and the items go into stock."
+        description="A load arrived from Raigam: enter its invoices (one or more) and their items. It is saved as one received purchase order and the items go into stock."
       />
       <ReceiveLoadForm
         key={key}
