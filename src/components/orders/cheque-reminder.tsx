@@ -4,7 +4,7 @@ import { BellRing, X } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import { useAppStore } from "@/lib/store";
-import { CHEQUE_REMIND_DAYS, chequeReminders, cn, formatDate, formatMoney, RAIGAM_CHEQUE_DAYS, round2, todayISO, weekdayOf } from "@/lib/utils";
+import { CHEQUE_REMIND_DAYS, chequeReminders, cn, formatDate, formatMoney, RAIGAM_CHEQUE_DAYS, raigamPayments, round2, todayISO, weekdayOf } from "@/lib/utils";
 import { ChequeCountdown } from "./order-payment";
 
 /** The day the reminder was hidden; it shows again the next day */
@@ -25,11 +25,14 @@ function hiddenToday() {
  */
 export function ChequeReminder() {
   const orders = useAppStore((s) => s.orders);
+  const orderInvoices = useAppStore((s) => s.orderInvoices);
+  const orderItems = useAppStore((s) => s.orderItems);
   const [hidden, setHidden] = useState(hiddenToday);
-  const due = chequeReminders(orders);
+  // One line per cheque: an order's, or each invoice's when they're paid one by one
+  const due = chequeReminders(raigamPayments(orders, orderInvoices, orderItems));
   if (hidden || due.length === 0) return null;
 
-  const total = round2(due.reduce((sum, r) => sum + r.order.totalBillAmount, 0));
+  const total = round2(due.reduce((sum, r) => sum + r.payment.totalBillAmount, 0));
   // Red on the last day, or once the date has passed with nothing paid
   const urgent = due.some((r) => r.days <= 1);
 
@@ -46,7 +49,7 @@ export function ChequeReminder() {
     <div
       role="alert"
       className={cn(
-        "mb-6 flex gap-3 rounded-xl border px-4 py-3 shadow-sm print:hidden",
+        "mb-6 flex gap-3 rounded-lg border px-4 py-3 shadow-sm print:hidden",
         urgent ? "border-red-200 bg-red-50 text-red-900" : "border-amber-200 bg-amber-50 text-amber-900",
       )}
     >
@@ -56,16 +59,16 @@ export function ChequeReminder() {
           {due.length === 1 ? "Cheque to Raigam" : `${due.length} cheques to Raigam`}: have {formatMoney(total)} in the bank
         </p>
         <ul className="mt-1 flex flex-col gap-1">
-          {due.map(({ order, date }) => (
-            <li key={order.id} className="flex flex-wrap items-baseline gap-x-2">
-              <Link href={`/orders/${order.id}`} className="font-semibold underline-offset-2 hover:underline">
-                {order.orderId}
+          {due.map(({ payment, date }) => (
+            <li key={payment.invoice?.id ?? payment.order.id} className="flex flex-wrap items-baseline gap-x-2">
+              <Link href={`/orders/${payment.order.id}`} className="font-semibold underline-offset-2 hover:underline">
+                {payment.label}
               </Link>
-              <span className="tabular-nums">{formatMoney(order.totalBillAmount)}</span>
+              <span className="tabular-nums">{formatMoney(payment.totalBillAmount)}</span>
               <span className="opacity-80">
-                · {order.paymentMethod ? `cheque ${order.chequeNumber}` : "no cheque entered yet"} · deposit on {weekdayOf(date)} {formatDate(date)} ·
+                · {payment.paymentMethod ? `cheque ${payment.chequeNumber}` : "no cheque entered yet"} · deposit on {weekdayOf(date)} {formatDate(date)} ·
               </span>
-              <ChequeCountdown order={order} />
+              <ChequeCountdown order={payment} />
             </li>
           ))}
         </ul>

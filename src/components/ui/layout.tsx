@@ -8,15 +8,15 @@ import { StickyHeader } from "./sticky-header";
 
 export function BackLink({ href, children }: { href: string; children: ReactNode }) {
   return (
-    <Link href={href} className="mb-3 inline-flex items-center gap-1.5 text-sm font-medium text-slate-500 hover:text-slate-800 print:hidden">
-      <ArrowLeft className="size-4" /> {children}
+    <Link href={href} className="mb-2 inline-flex items-center gap-1.5 text-[13px] font-medium text-slate-500 hover:text-slate-900 print:hidden">
+      <ArrowLeft className="size-3.5" /> {children}
     </Link>
   );
 }
 
 export function NotFoundState({ title, href, linkLabel }: { title: string; href: string; linkLabel: string }) {
   return (
-    <div className="rounded-xl border border-dashed border-slate-300 bg-white px-6 py-16 text-center">
+    <div className="rounded-lg border border-dashed border-slate-300 bg-white px-6 py-16 text-center">
       <p className="text-base font-semibold text-slate-900">{title}</p>
       <p className="mt-1 text-sm text-slate-500">It may have been deleted.</p>
       <Link href={href} className={buttonClass("outline", "md", "mt-5")}>
@@ -39,8 +39,8 @@ export function SummaryTile({
   tone?: "default" | "danger" | "good";
 }) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
-      <p className="text-xs font-medium tracking-wide text-slate-500 uppercase">{label}</p>
+    <div className="rounded-lg border border-slate-200 bg-white px-4 py-3">
+      <p className="text-xs font-medium text-slate-500">{label}</p>
       <p
         className={cn(
           "mt-1 text-lg leading-tight font-semibold tracking-tight tabular-nums",
@@ -58,7 +58,7 @@ export function SummaryTile({
 export function Detail({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div>
-      <dt className="text-xs font-medium tracking-wide text-slate-500 uppercase">{label}</dt>
+      <dt className="text-xs font-medium text-slate-500">{label}</dt>
       <dd className="mt-1 text-sm font-medium text-slate-900">{children}</dd>
     </div>
   );
@@ -80,7 +80,7 @@ export function PageHeader({
 export function Card({ className, children }: { className?: string; children: ReactNode }) {
   return (
     // scroll-mt clears the sticky mobile header when paging scrolls back to the table top
-    <section className={cn("scroll-mt-20 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm", className)}>
+    <section className={cn("scroll-mt-20 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-[0_1px_2px_rgb(0_0_0/0.03)]", className)}>
       {children}
     </section>
   );
@@ -88,9 +88,9 @@ export function Card({ className, children }: { className?: string; children: Re
 
 export function CardHeader({ title, description, actions }: { title: ReactNode; description?: ReactNode; actions?: ReactNode }) {
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-5 py-4">
+    <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
       <div>
-        <h2 className="text-sm font-semibold text-slate-900">{title}</h2>
+        <h2 className="text-[13px] font-semibold text-slate-900">{title}</h2>
         {description && <p className="mt-0.5 text-xs text-slate-500">{description}</p>}
       </div>
       {actions}
@@ -101,7 +101,7 @@ export function CardHeader({ title, description, actions }: { title: ReactNode; 
 /** Search + filters row above a table */
 export function Toolbar({ children }: { children: ReactNode }) {
   return (
-    <div className="flex flex-col gap-2 border-b border-slate-200 bg-slate-50/60 px-4 py-2.5 sm:flex-row sm:flex-wrap sm:items-center">
+    <div className="flex flex-col gap-2 border-b border-slate-200 bg-white px-3 py-2 sm:flex-row sm:flex-wrap sm:items-center">
       {children}
     </div>
   );
@@ -110,10 +110,10 @@ export function Toolbar({ children }: { children: ReactNode }) {
 export function SearchInput({ className, ...props }: ComponentProps<"input">) {
   return (
     <div className={cn("relative w-full sm:max-w-xs", className)}>
-      <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-slate-400" />
+      <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-slate-400" />
       <input
         type="search"
-        className="h-9 w-full rounded-lg border border-slate-300 bg-white pr-3 pl-9 text-sm shadow-sm placeholder:text-slate-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 focus:outline-none"
+        className="h-8 w-full rounded-md border border-slate-200 bg-white pr-2.5 pl-8 text-[13px] placeholder:text-slate-400 hover:border-slate-300 focus:border-brand-500 focus:ring-[3px] focus:ring-brand-500/15 focus:outline-none pointer-coarse:h-10"
         {...props}
       />
     </div>
@@ -131,15 +131,15 @@ export function FilterTabs<T extends string>({
   onChange: (v: T) => void;
 }) {
   return (
-    <div className="flex flex-wrap gap-1 rounded-lg bg-slate-200/60 p-1">
+    <div className="inline-flex flex-wrap gap-0.5 rounded-md border border-slate-200 bg-slate-100/70 p-0.5">
       {options.map((o) => (
         <button
           key={o.value}
           type="button"
           onClick={() => onChange(o.value)}
           className={cn(
-            "rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
-            value === o.value ? "bg-white text-slate-900 shadow-sm" : "text-slate-600 hover:text-slate-900",
+            "rounded-[5px] px-2.5 py-1 text-[13px] font-medium transition-colors pointer-coarse:py-1.5",
+            value === o.value ? "bg-white text-slate-900 shadow-[0_1px_2px_rgb(0_0_0/0.08)] ring-1 ring-slate-200" : "text-slate-500 hover:text-slate-900",
           )}
         >
           {o.label}
@@ -163,7 +163,7 @@ export function ClearFilters({ active, onClear }: { active: boolean; onClear: ()
 /** Summary line under a table; `pager` (page buttons) sits on the right */
 export function TableFooter({ children, pager }: { children: ReactNode; pager?: ReactNode }) {
   return (
-    <div className="flex flex-col gap-2 border-t border-slate-200 bg-slate-50/60 px-4 py-2.5 text-xs text-slate-500 sm:flex-row sm:items-center sm:justify-between">
+    <div className="flex flex-col gap-2 border-t border-slate-200 bg-white px-4 py-2 text-xs text-slate-500 sm:flex-row sm:items-center sm:justify-between">
       <div>{children}</div>
       {pager}
     </div>

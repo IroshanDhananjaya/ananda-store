@@ -90,7 +90,7 @@ export function EditOrder({ id }: { id: string }) {
     return (
       <>
         <BackLink href={`/orders/${id}`}>{order.orderId}</BackLink>
-        <div className="rounded-xl border border-amber-200 bg-amber-50 px-6 py-10 text-center">
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-6 py-10 text-center">
           <Lock className="mx-auto size-6 text-amber-600" />
           <p className="mt-3 font-semibold text-amber-900">{order.orderId} {order.postedToStock ? "is posted to stock" : "is partly in stock"}</p>
           <p className="mt-1 text-sm text-amber-800">Reverse the stock posting from the order page before editing it.</p>

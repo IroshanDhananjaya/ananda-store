@@ -46,11 +46,15 @@ export const useAppStore = create<AppStore>()((set, get) => {
       if (get().saving) return fail("Still saving the last change. Please wait a moment.");
       set({ saving: true });
       try {
-        const { result, changes, signedOut } = await runAction(name, args, todayISO());
+        // No answer in 30 seconds: stop waiting, so the app isn't stuck on "Saving…" for good
+        const timeout = new Promise<never>((_, reject) => setTimeout(() => reject(new Error("timeout")), 30_000));
+        const { result, changes, signedOut } = await Promise.race([runAction(name, args, todayISO()), timeout]);
         if (signedOut) goToLogin();
         set(changes);
         return result;
-      } catch {
+      } catch (e) {
+        if (e instanceof Error && e.message === "timeout")
+          return fail("No answer from the server after 30 seconds. Check the internet, then reload the page to see whether it was saved before trying again.");
         return fail("Couldn't reach the server. Check the internet connection and try again.");
       } finally {
         set({ saving: false });

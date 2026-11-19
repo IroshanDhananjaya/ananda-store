@@ -3,7 +3,7 @@
 import { ClipboardCheck, Printer } from "lucide-react";
 import Link from "next/link";
 import { Fragment, useEffect, useMemo, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { Button, buttonClass } from "@/components/ui/button";
 import { FilterTabs, SearchInput } from "@/components/ui/layout";
 import { useAppStore, useLastInvoicePrices } from "@/lib/store";
@@ -236,7 +236,7 @@ export function OrderSheet({
 
       <div
         className={cn(
-          "overflow-hidden rounded-xl border border-slate-300 bg-white shadow-sm print:overflow-visible print:rounded-none print:border-0 print:shadow-none",
+          "overflow-hidden rounded-lg border border-slate-300 bg-white shadow-sm print:overflow-visible print:rounded-none print:border-0 print:shadow-none",
           printCheck && "print:hidden",
         )}
       >

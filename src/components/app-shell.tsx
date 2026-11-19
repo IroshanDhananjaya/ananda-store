@@ -27,13 +27,15 @@ import {
   TrendingUp,
   Trophy,
   Warehouse,
+  WifiOff,
   X,
   type LucideIcon,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { startTransition, Suspense, useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
-import { Toaster, toast } from "sonner";
+import { Toaster } from "sonner";
+import { toast } from "@/lib/toast";
 import { LogoMark } from "@/components/logo";
 import { ChequeReminder } from "@/components/orders/cheque-reminder";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -61,6 +63,8 @@ const nav: NavGroup[] = [
       { href: "/payments", label: "Payments", icon: HandCoins },
       { href: "/cheques", label: "Cheques & Credit", icon: Landmark },
       { href: "/expenses", label: "Expenses", icon: Receipt },
+      // Store balances and statements are looked up every day
+      { href: "/stores", label: "Stores", icon: Store },
     ],
   },
   {
@@ -97,7 +101,6 @@ const nav: NavGroup[] = [
     title: "Setup",
     items: [
       { href: "/routes", label: "Routes", icon: Route },
-      { href: "/stores", label: "Stores", icon: Store },
       { href: "/items", label: "Items", icon: Package },
       { href: "/locations", label: "Stock Locations", icon: MapPin },
       { href: "/checks", label: "Data Checks", icon: ShieldCheck },
@@ -154,20 +157,20 @@ function NavLinks({ pathname, onNavigate }: { pathname: string | null; onNavigat
   const isActive = ({ href, also }: NavItem) => pathname !== null && (href === "/" ? pathname === "/" : under(href) || (!!also && under(also)));
 
   return (
-    <nav className="flex flex-col gap-3">
+    <nav className="flex flex-col gap-4">
       {nav.map((group) => {
         const hasActive = group.items.some(isActive);
         // The group of the page you're on stays open
         const open = !group.title || hasActive || !folded[group.id];
         return (
-          <div key={group.id} className="flex flex-col gap-0.5">
+          <div key={group.id} className="flex flex-col gap-px">
             {group.title && (
               <button
                 type="button"
                 onClick={() => toggle(group.id)}
                 disabled={hasActive}
                 aria-expanded={open}
-                className="flex items-center justify-between rounded-md px-3 py-1 text-[11px] font-semibold tracking-wider text-brand-300 uppercase hover:text-white disabled:cursor-default disabled:hover:text-brand-300"
+                className="group/head flex items-center justify-between rounded-md px-2 py-1 text-xs font-medium text-slate-500 hover:text-slate-800 disabled:cursor-default disabled:hover:text-slate-500"
               >
                 <span>{group.title}</span>
                 <span className="flex items-center gap-1.5">
@@ -186,14 +189,13 @@ function NavLinks({ pathname, onNavigate }: { pathname: string | null; onNavigat
                     href={href}
                     onClick={onNavigate}
                     className={cn(
-                      "flex items-center gap-3 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors",
-                      // Orange bar on the current page, like the logo's swoosh
+                      "flex h-7 items-center gap-2.5 rounded-md px-2 text-[13px] font-medium transition-colors pointer-coarse:h-9",
                       active
-                        ? "bg-white/15 text-white shadow-[inset_3px_0_0_var(--color-accent-500)]"
-                        : "text-brand-100 hover:bg-white/10 hover:text-white",
+                        ? "bg-slate-200/70 text-slate-900"
+                        : "text-slate-600 hover:bg-slate-200/50 hover:text-slate-900",
                     )}
                   >
-                    <Icon className="size-4.5 shrink-0" />
+                    <Icon className={cn("size-4 shrink-0", active ? "text-slate-700" : "text-slate-400")} />
                     {label}
                   </Link>
                 );
@@ -222,7 +224,7 @@ const THEMES: { value: ThemeChoice; label: string; icon: LucideIcon }[] = [
 function ThemeSwitch() {
   const choice = useThemeChoice();
   return (
-    <div role="radiogroup" aria-label="Theme" className="grid grid-cols-3 gap-1 rounded-lg bg-white/5 p-1">
+    <div role="radiogroup" aria-label="Theme" className="grid grid-cols-3 gap-0.5 rounded-md border border-slate-200 bg-slate-100/70 p-0.5">
       {THEMES.map(({ value, label, icon: Icon }) => (
         <button
           key={value}
@@ -232,8 +234,8 @@ function ThemeSwitch() {
           onClick={() => setTheme(value)}
           title={value === "system" ? "Follow the computer's light / dark setting" : `${label} theme`}
           className={cn(
-            "flex items-center justify-center gap-1.5 rounded-md py-1.5 text-xs font-medium transition-colors",
-            choice === value ? "bg-white/15 text-white" : "text-brand-200 hover:bg-white/10 hover:text-white",
+            "flex items-center justify-center gap-1.5 rounded-[5px] py-1 text-xs font-medium transition-colors",
+            choice === value ? "bg-white text-slate-900 shadow-[0_1px_2px_rgb(0_0_0/0.08)] ring-1 ring-slate-200" : "text-slate-500 hover:text-slate-900",
           )}
         >
           <Icon className="size-3.5" /> {label}
@@ -255,15 +257,18 @@ function UserBox() {
     toast.error(result?.error ?? "Couldn't reach the server. Check the internet connection and try again.");
   };
   return (
-    <div className="flex items-center gap-2 border-t border-white/10 px-2 pt-4">
-      <span className="min-w-0 flex-1 truncate text-xs text-brand-200" title={userEmail}>
+    <div className="flex items-center gap-2 border-t border-slate-200 px-1 pt-3">
+      <span className="grid size-6 shrink-0 place-items-center rounded-full bg-brand-600 text-[11px] font-semibold text-white uppercase" aria-hidden>
+        {userEmail?.[0] ?? "?"}
+      </span>
+      <span className="min-w-0 flex-1 truncate text-xs text-slate-500" title={userEmail}>
         {userEmail}
       </span>
       <button
         type="button"
         onClick={handleSignOut}
         disabled={signingOut}
-        className="inline-flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-white hover:bg-white/10 disabled:opacity-50"
+        className="inline-flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-200/60 hover:text-slate-900 disabled:opacity-50"
       >
         <LogOut className="size-3.5" /> {signingOut ? "Signing out…" : "Sign out"}
       </button>
@@ -274,27 +279,24 @@ function UserBox() {
 function SidebarContent({ onNavigate, onReset }: { onNavigate?: () => void; onReset: () => void }) {
   const canResetDemo = useAppStore((s) => s.canResetDemo);
   return (
-    <div className="flex h-full flex-col gap-5 overflow-y-auto px-3 py-4">
-      <Link href="/" onClick={onNavigate} className="flex items-center gap-3 px-2">
-        <span className="grid size-10 shrink-0 place-items-center rounded-lg bg-white">
-          <LogoMark size={32} />
+    <div className="flex h-full flex-col gap-4 overflow-y-auto px-2.5 py-3">
+      <Link href="/" onClick={onNavigate} className="flex items-center gap-2 rounded-md px-1.5 py-1 hover:bg-slate-200/50">
+        <span className="grid size-6 shrink-0 place-items-center rounded-md border border-slate-200 bg-white">
+          <LogoMark size={18} />
         </span>
-        <span className="leading-tight">
-          <span className="block text-sm font-semibold text-white">Ananda Stores</span>
-          <span className="block text-xs text-brand-200">Store Management</span>
-        </span>
+        <span className="text-[13px] font-semibold text-slate-900">Ananda Stores</span>
       </Link>
 
       <Suspense fallback={<NavLinks pathname={null} />}>
         <ActiveNavLinks onNavigate={onNavigate} />
       </Suspense>
 
-      <div className="mt-auto flex flex-col gap-4">
+      <div className="mt-auto flex flex-col gap-3">
         {canResetDemo && (
-          <div className="rounded-lg bg-white/5 p-3 text-xs text-brand-100">
-            <p className="font-medium text-white">Demo mode</p>
-            <p className="mt-1 text-brand-200">Sample data, shared by everyone using the app.</p>
-            <button type="button" onClick={onReset} className="mt-2 inline-flex items-center gap-1.5 font-medium text-white hover:underline">
+          <div className="rounded-md border border-slate-200 bg-white p-3 text-xs text-slate-600">
+            <p className="font-medium text-slate-900">Demo mode</p>
+            <p className="mt-1 text-slate-500">Sample data, shared by everyone using the app.</p>
+            <button type="button" onClick={onReset} className="mt-2 inline-flex items-center gap-1.5 font-medium text-brand-700 hover:underline">
               <RotateCcw className="size-3.5" /> Reset demo data
             </button>
           </div>
@@ -306,11 +308,50 @@ function SidebarContent({ onNavigate, onReset }: { onNavigate?: () => void; onRe
   );
 }
 
+/** The browser's online / offline state */
+function useOnline() {
+  return useSyncExternalStore(
+    (onChange) => {
+      window.addEventListener("online", onChange);
+      window.addEventListener("offline", onChange);
+      return () => {
+        window.removeEventListener("online", onChange);
+        window.removeEventListener("offline", onChange);
+      };
+    },
+    () => navigator.onLine,
+    () => true,
+  );
+}
+
+/**
+ * A strip at the top of every page when the figures may be old: no internet, or the
+ * last refresh failed. Without it people quote balances and stock from old data.
+ */
+function StaleBanner({ online, refreshFailed, onRetry }: { online: boolean; refreshFailed: boolean; onRetry: () => void }) {
+  if (online && !refreshFailed) return null;
+  return (
+    <div role="alert" className="-mx-4 -mt-4 mb-4 flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-amber-200 bg-amber-50 px-4 py-2 text-[13px] text-amber-900 sm:-mx-5 sm:px-5 lg:-mx-6 lg:-mt-5 lg:rounded-t-lg lg:px-6 print:hidden">
+      <WifiOff className="size-4 shrink-0" />
+      <span className="flex-1">
+        {online
+          ? "Couldn't refresh the data. Balances and stock on screen may be out of date."
+          : "No internet. Balances and stock on screen may be out of date, and changes can't be saved."}
+      </span>
+      {online && (
+        <button type="button" onClick={onRetry} className="font-medium underline underline-offset-2">
+          Try again
+        </button>
+      )}
+    </div>
+  );
+}
+
 function LoadingScreen() {
   return (
     <div className="grid min-h-[60vh] place-items-center text-sm text-slate-500">
       <div className="flex items-center gap-3">
-        <span className="size-4 animate-spin rounded-full border-2 border-brand-200 border-t-brand-600" />
+        <span className="size-4 animate-spin rounded-full border-2 border-slate-200 border-t-brand-600" />
         Loading store data…
       </div>
     </div>
@@ -320,7 +361,7 @@ function LoadingScreen() {
 function LoadError({ message, onRetry }: { message: string; onRetry: () => void }) {
   return (
     <div className="grid min-h-[60vh] place-items-center">
-      <div className="max-w-md rounded-xl border border-red-200 bg-white p-6 text-sm shadow-sm">
+      <div className="max-w-md rounded-lg border border-red-200 bg-white p-6 text-sm shadow-sm">
         <p className="font-semibold text-slate-900">{message}</p>
         <p className="mt-2 text-slate-600">
           Check the internet connection. On Supabase&apos;s free plan the database pauses after 7 days without use: open the
@@ -341,6 +382,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const saving = useAppStore((s) => s.saving);
   const reload = useAppStore((s) => s.reload);
   const resetDemoData = useAppStore((s) => s.resetDemoData);
+  const online = useOnline();
 
   // Load on start, and again when the user comes back to the app since others may have made
   // changes: from another tab (visibilitychange) or another window, e.g. the editor (focus)
@@ -358,11 +400,24 @@ export function AppShell({ children }: { children: ReactNode }) {
     };
     document.addEventListener("visibilitychange", onBack);
     window.addEventListener("focus", onBack);
+    // Internet back: fetch fresh figures straight away
+    window.addEventListener("online", onBack);
     return () => {
       document.removeEventListener("visibilitychange", onBack);
       window.removeEventListener("focus", onBack);
+      window.removeEventListener("online", onBack);
     };
   }, [reload]);
+
+  // Every number box: the mouse wheel scrolls the page instead of quietly changing the number
+  useEffect(() => {
+    const onWheel = (e: WheelEvent) => {
+      const el = e.target;
+      if (el instanceof HTMLInputElement && el.type === "number" && document.activeElement === el) el.blur();
+    };
+    document.addEventListener("wheel", onWheel, { passive: true });
+    return () => document.removeEventListener("wheel", onWheel);
+  }, []);
 
   const [mobileOpen, setMobileOpen] = useState(false);
   // Lives here, not in the sidebar: a dialog inside the fixed sidebar would be trapped
@@ -376,7 +431,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   return (
     <div className="flex min-h-dvh">
       {/* Desktop sidebar */}
-      <aside className="fixed inset-y-0 left-0 hidden w-56 bg-brand-800 lg:block print:hidden">
+      {/* Linear-style: a light sidebar on the app's grey, the page on a white panel beside it */}
+      <aside className="fixed inset-y-0 left-0 hidden w-56 bg-slate-50 lg:block print:hidden">
         <SidebarContent onReset={openReset} />
       </aside>
 
@@ -384,11 +440,11 @@ export function AppShell({ children }: { children: ReactNode }) {
       {mobileOpen && (
         <div className="fixed inset-0 z-40 lg:hidden">
           <div className="absolute inset-0 bg-slate-900/50" onClick={() => setMobileOpen(false)} aria-hidden />
-          <aside className="absolute inset-y-0 left-0 w-72 bg-brand-800 shadow-xl">
+          <aside className="absolute inset-y-0 left-0 w-72 border-r border-slate-200 bg-slate-50 shadow-xl">
             <button
               type="button"
               onClick={() => setMobileOpen(false)}
-              className="absolute top-5 right-3 rounded-md p-1 text-brand-100 hover:bg-white/10"
+              className="absolute top-3 right-3 rounded-md p-1 text-slate-500 hover:bg-slate-200/60"
               aria-label="Close menu"
             >
               <X className="size-5" />
@@ -399,11 +455,11 @@ export function AppShell({ children }: { children: ReactNode }) {
       )}
 
       <div className="flex min-w-0 flex-1 flex-col lg:pl-56 print:pl-0">
-        <header className="sticky top-0 z-30 flex items-center gap-3 border-b border-slate-200 bg-white/90 px-4 py-3 backdrop-blur lg:hidden print:hidden">
+        <header className="sticky top-0 z-30 flex items-center gap-3 border-b border-slate-200 bg-white/95 px-4 py-3 lg:hidden print:hidden">
           <button
             type="button"
             onClick={() => setMobileOpen(true)}
-            className="rounded-md p-1.5 text-slate-600 hover:bg-slate-100"
+            className="-ml-1 rounded-md p-2 text-slate-600 hover:bg-slate-100"
             aria-label="Open menu"
           >
             <Menu className="size-5" />
@@ -413,9 +469,10 @@ export function AppShell({ children }: { children: ReactNode }) {
           </span>
         </header>
 
-        <main className="w-full min-w-0 flex-1 px-4 py-4 sm:px-5 lg:px-6 lg:py-5 print:p-0">
+        <main className="w-full min-w-0 flex-1 bg-white px-4 py-4 sm:px-5 lg:my-2 lg:mr-2 lg:rounded-lg lg:border lg:border-slate-200 lg:px-6 lg:py-5 lg:shadow-[0_1px_3px_rgb(0_0_0/0.04)] print:m-0 print:rounded-none print:border-0 print:p-0 print:shadow-none">
           {loaded ? (
             <>
+              <StaleBanner online={online} refreshFailed={!!loadError} onRetry={() => startTransition(() => reload())} />
               {/* Raigam cheques about to be deposited, on every page */}
               <ChequeReminder />
               {children}

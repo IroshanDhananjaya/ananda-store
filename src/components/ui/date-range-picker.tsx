@@ -2,7 +2,7 @@
 
 import { CalendarDays, ChevronDown, ChevronLeft, ChevronRight } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
-import { addDays, cn, todayISO } from "@/lib/utils";
+import { addDays, cn, formatDate, todayISO } from "@/lib/utils";
 
 export type DateRange = { from: string; to: string };
 
@@ -94,7 +94,13 @@ export function DateRangePicker({
   /** Day the arrow keys move from: the one day button in the tab order */
   const [focused, setFocused] = useState("");
 
-  const text = value.from || value.to ? `${value.from || "…"} - ${value.to || "…"}` : placeholder;
+  // Day first, as on every table and paper bill (not 2026-11-01)
+  const text =
+    value.from && value.from === value.to
+      ? formatDate(value.from)
+      : value.from || value.to
+        ? `${value.from ? formatDate(value.from) : "…"} – ${value.to ? formatDate(value.to) : "…"}`
+        : placeholder;
 
   function show() {
     const now = todayISO();
@@ -316,7 +322,7 @@ export function DateRangePicker({
           ref={panelRef}
           role="dialog"
           aria-label="Choose dates"
-          className="fixed z-[60] max-w-[calc(100vw-1rem)] rounded-xl border border-slate-200 bg-white shadow-xl"
+          className="fixed z-[60] max-w-[calc(100vw-1rem)] rounded-lg border border-slate-200 bg-white shadow-xl"
         >
           <div className="flex gap-8 p-4">{[0, 1].map(renderMonth)}</div>
           <div className="flex min-h-13 items-center justify-between gap-3 border-t border-slate-200 px-4 py-2">

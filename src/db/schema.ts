@@ -97,6 +97,13 @@ export const orderInvoices = pgTable("order_invoices", {
   invoiceDate: date({ mode: "string" }),
   /** Raigam's "Discount % for Total Invoice", taken off this invoice's lines total (0 = none) */
   discountPercent: numeric({ precision: 5, scale: 2, mode: "number" }).notNull().default(0),
+  // Paid on its own (when the order's invoices are paid one by one; else the order's payment covers it).
+  // Same fields as the order's: method "" = not paid yet
+  paymentMethod: text().notNull().default(""),
+  paidDate: date({ mode: "string" }),
+  chequeNumber: text().notNull().default(""),
+  chequeDepositDate: date({ mode: "string" }),
+  paymentReference: text().notNull().default(""),
 }, () => [noApiAccess()]).enableRLS();
 
 export const orderItems = pgTable(

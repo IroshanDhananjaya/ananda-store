@@ -102,6 +102,7 @@ function withOrderInvoices(data: Data): Data {
       company: "",
       invoiceDate: o.receivedDate,
       discountPercent: o.discountPercent ?? 0,
+      ...NOT_PAID,
     }));
   const received = new Map(data.orders.filter((o) => o.receivedDate).map((o) => [o.orderId, `inv-${o.id}`]));
   return {

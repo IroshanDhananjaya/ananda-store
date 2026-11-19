@@ -1,7 +1,7 @@
 "use client";
 
 import { Circle, CircleCheck } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { useAppStore } from "@/lib/store";
 import type { Sale } from "@/lib/types";
 import { cn } from "@/lib/utils";

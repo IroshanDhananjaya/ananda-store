@@ -63,7 +63,7 @@ import {
   type ReceiveLoadInput,
   type ReceiveOrderInput,
 } from "./types";
-import { netUnitCost, newId, nextCode, nextOrderId, NOT_PAID, orderTotal, round2 } from "./utils";
+import { netUnitCost, newId, nextCode, nextOrderId, NOT_PAID, orderTotal, paymentOf, round2 } from "./utils";
 
 // Business rules for every change to the data. Runs on the server (src/db/repo.ts)
 // against the rows loaded from the database inside a transaction; whatever the
@@ -123,6 +123,11 @@ export type Actions = {
   deleteOrder: (id: string) => Result;
   /** Record how a Raigam bill was paid; works on posted orders too */
   payOrder: (id: string, payment: OrderPayment) => Result;
+  /**
+   * Record how one of an order's Raigam invoices was paid, when its invoices are paid one by one
+   * (each its own cheque). Not while the order has one payment for the whole bill.
+   */
+  payOrderInvoice: (id: string, invoiceId: string, payment: OrderPayment) => Result;
   /** Add a Raigam invoice to an order (`invoiceId` null) or change one's number, PO, company, date or discount %; works on posted orders too */
   saveOrderInvoice: (id: string, invoiceId: string | null, input: OrderInvoiceInput) => Result;
   /** The goods came: the received date, the Raigam invoices they came on and each item's count. Items already in stock can't change. */
@@ -240,6 +245,7 @@ export const ACTION_NAMES = [
   "updateOrder",
   "deleteOrder",
   "payOrder",
+  "payOrderInvoice",
   "saveOrderInvoice",
   "receiveOrder",
   "moveOrderLine",
@@ -936,12 +942,30 @@ export const createCore =
     },
     payOrder: (id, payment) => {
       // Raigam is usually paid after the load is in stock, so posted orders are allowed
-      if (!get().orders.some((o) => o.id === id)) return fail("Order not found.");
+      const order = get().orders.find((o) => o.id === id);
+      if (!order) return fail("Order not found.");
       const err = validateOrderPayment(payment);
       if (err) return fail(err);
+      // One way or the other, so nothing is paid twice
+      if (payment.paymentMethod && get().orderInvoices.some((i) => i.orderId === order.orderId && i.paymentMethod))
+        return fail(`${order.orderId}'s invoices are paid one by one. Change each invoice's payment in the Raigam invoices table on the order page.`);
       const clean = cleanOrderPayment(payment);
       set((s) => ({ orders: s.orders.map((o) => (o.id === id ? { ...o, ...clean } : o)) }));
       return ok(id);
+    },
+    payOrderInvoice: (id, invoiceId, payment) => {
+      const { orders, orderInvoices } = get();
+      const order = orders.find((o) => o.id === id);
+      if (!order) return fail("Order not found.");
+      const invoice = orderInvoices.find((i) => i.id === invoiceId && i.orderId === order.orderId);
+      if (!invoice) return fail("That invoice isn't on this order any more. Reload the page.");
+      if (payment.paymentMethod && order.paymentMethod)
+        return fail(`${order.orderId} has one payment for the whole bill. Set that to Not paid first, then pay its invoices one by one.`);
+      const err = validateOrderPayment(payment);
+      if (err) return fail(err);
+      const clean = cleanOrderPayment(payment);
+      set((s) => ({ orderInvoices: s.orderInvoices.map((i) => (i.id === invoiceId ? { ...i, ...clean } : i)) }));
+      return ok(invoiceId);
     },
     saveOrderInvoice: (id, invoiceId, input) => {
       // The invoice number often comes after the load is in stock, so posted orders are allowed
@@ -955,7 +979,7 @@ export const createCore =
       const clean = cleanInvoice(input);
       const dup = duplicateInvoice(orderInvoices, clean.invoiceNumber, current?.id);
       if (dup) return fail(`Invoice ${clean.invoiceNumber} is already entered on ${dup.orderId}.`);
-      const invoice: OrderInvoice = { ...clean, id: current?.id ?? newId(), orderId: order.orderId };
+      const invoice: OrderInvoice = { ...clean, ...(current ? paymentOf(current) : NOT_PAID), id: current?.id ?? newId(), orderId: order.orderId };
       const nextInvoices = current ? orderInvoices.map((i) => (i.id === current.id ? invoice : i)) : [...orderInvoices, invoice];
       // A new discount % changes what the order comes to
       set({ orderInvoices: nextInvoices, orders: orders.map((o) => (o.id === id ? totalled(o, nextInvoices, orderItems) : o)) });
@@ -984,7 +1008,7 @@ export const createCore =
         if (twice) return fail(`Invoice ${clean.invoiceNumber} is entered twice.`);
         const dup = duplicateInvoice(orderInvoices.filter((i) => i.orderId !== order.orderId), clean.invoiceNumber);
         if (dup) return fail(`Invoice ${clean.invoiceNumber} is already entered on ${dup.orderId}.`);
-        const invoice: OrderInvoice = { ...clean, id: existing?.id ?? newId(), orderId: order.orderId };
+        const invoice: OrderInvoice = { ...clean, ...(existing ? paymentOf(existing) : NOT_PAID), id: existing?.id ?? newId(), orderId: order.orderId };
         idByKey.set(inv.key, invoice.id);
         invoices.push(invoice);
       }
@@ -1187,6 +1211,8 @@ export const createCore =
           company: (inv.company ?? "").trim(),
           invoiceDate: input.deliveryDate,
           discountPercent,
+          // The load's payment (if any) is on the order, for the whole bill
+          ...NOT_PAID,
         };
         invoices.push(invoice);
         for (const l of inv.lines) {

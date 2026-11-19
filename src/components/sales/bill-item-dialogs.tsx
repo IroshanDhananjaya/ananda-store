@@ -2,7 +2,7 @@
 
 import { ArrowLeft, Ban, ChevronRight, Gift, PackageMinus, StickyNote, Tag, Trash2, Undo2 } from "lucide-react";
 import { useState, type FormEvent, type ReactNode } from "react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { Button } from "@/components/ui/button";
 import { Field, Input, toNumber } from "@/components/ui/form";
 import { FilterTabs } from "@/components/ui/layout";
@@ -359,7 +359,7 @@ function ChangeCard({ icon, title, now, tone, onClick }: { icon: ReactNode; titl
       type="button"
       onClick={onClick}
       className={cn(
-        "flex w-full items-center gap-3 rounded-xl border bg-white px-3 py-3 text-left transition-colors hover:border-brand-300 hover:bg-brand-50/50",
+        "flex w-full items-center gap-3 rounded-lg border bg-white px-3 py-3 text-left transition-colors hover:border-brand-300 hover:bg-brand-50/50",
         tone === "red" ? "border-red-200" : "border-slate-200",
       )}
     >

@@ -70,7 +70,7 @@ export function OrderSuggestions({
   const coveredByOrder = countOnOrder ? moving.filter((r) => r.suggest === 0 && r.onOrder > 0 && r.stock - r.toLoad < r.perDay * coverDays).length : 0;
 
   return (
-    <div className="overflow-hidden rounded-xl border border-brand-200 bg-white shadow-sm print:hidden">
+    <div className="overflow-hidden rounded-lg border border-brand-200 bg-white shadow-sm print:hidden">
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
@@ -156,7 +156,7 @@ export function OrderSuggestions({
 
           <div className="max-h-[28rem] overflow-auto border-t border-slate-200">
             <table className="w-full text-sm">
-              <thead className="sticky top-0 z-10 bg-slate-50 text-left text-xs font-semibold tracking-wide text-slate-500 uppercase">
+              <thead className="sticky top-0 z-10 bg-slate-50 text-left text-xs font-medium text-slate-500">
                 <tr>
                   <th className="px-4 py-2 sm:pl-6">Item</th>
                   <th className="px-3 py-2 text-right" title={`Units on bills dated in the last ${lookbackDays} days, delivered or not`}>

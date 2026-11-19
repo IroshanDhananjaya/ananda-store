@@ -4,7 +4,7 @@ import { CircleCheck, CloudDownload, Eye, FileText, Pencil, Plus, Printer, Trash
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { LoadLorryDialog } from "@/components/sales/load-lorry-dialog";
 import { BillStatusBadge, DueDateLabel } from "@/components/ui/badge";
 import { Button, buttonClass } from "@/components/ui/button";
@@ -23,6 +23,7 @@ import { BillStatusMenu } from "@/components/sales/bill-status-menu";
 import { BillFlags } from "@/components/sales/bill-flags";
 import { CheckedToggle } from "@/components/sales/checked-toggle";
 import { CashSheet } from "./cash-sheet";
+import { CashSheetDialog } from "./cash-sheet-dialog";
 import { formatPct, returnRate, returnSplit } from "@/lib/returns";
 import { LoadingList } from "./loading-list";
 import { PrintedBills } from "./printed-bills";
@@ -176,12 +177,19 @@ function InvoicesPage({
   /** Bills ticked to print (Print bills), kept while the filters change */
   const [ticked, setTicked] = useState<Set<string>>(new Set());
   /** What the next print is: the cash sheet (default), or the ticked bills one per page */
-  const [printing, setPrinting] = useState<"sheet" | "bills">("sheet");
+  const [printing, setPrinting] = useState<"sheet" | "bills" | "picked">("sheet");
+  /** Cash sheet: choosing its bills (ticked off the list, plus any from other days) */
+  const [pickingSheet, setPickingSheet] = useState(false);
+  /** The bills picked for the cash sheet being printed; null = the list as it is (e.g. Ctrl+P) */
+  const [sheetIds, setSheetIds] = useState<string[] | null>(null);
 
-  // Print bills: once the ticked bills are on the page, open the print window ("Save as PDF" there makes the PDF)
+  // Print bills / the picked cash sheet: once they're on the page, open the print window ("Save as PDF" there makes the PDF)
   useEffect(() => {
-    if (printing !== "bills") return;
-    const done = () => setPrinting("sheet");
+    if (printing === "sheet") return;
+    const done = () => {
+      setPrinting("sheet");
+      setSheetIds(null);
+    };
     window.addEventListener("afterprint", done, { once: true });
     const timer = window.setTimeout(() => window.print(), 50);
     return () => {
@@ -296,7 +304,7 @@ function InvoicesPage({
               <Button variant="outline" onClick={() => setSyncing(true)} title="Add and update bills from Raigam's system for a date range">
                 <CloudDownload /> Sync from Raigam
               </Button>
-              <Button variant="outline" onClick={() => window.print()}>
+              <Button variant="outline" onClick={() => (view === "invoices" ? setPickingSheet(true) : window.print())}>
                 <Printer /> {view === "invoices" ? "Print cash sheet" : "Print"}
               </Button>
               {view === "invoices" && (
@@ -631,8 +639,30 @@ function InvoicesPage({
         (printing === "bills" ? (
           <PrintedBills sales={chosen} />
         ) : (
-          <CashSheet sales={live} dateOf={dateOf} period={period} route={route} storeName={shop?.shopName} />
+          <CashSheet
+            sales={sheetIds ? sheetIds.map((id) => sales.find((s) => s.id === id)).filter((s): s is Sale => !!s) : live}
+            dateOf={dateOf}
+            period={sheetIds && sheetIds.some((id) => !live.some((s) => s.id === id)) ? `${period} + bills from other days` : period}
+            route={route}
+            storeName={shop?.shopName}
+          />
         ))}
+
+      <CashSheetDialog
+        open={pickingSheet}
+        onClose={() => setPickingSheet(false)}
+        inList={live}
+        // Any day's bill on the same route / store can join the sheet (e.g. delivered with this load)
+        candidates={sales.filter(
+          (s) => s.status !== "Cancelled" && (!routeId || shopMap.get(s.shopId)?.routeId === routeId) && (!shopId || s.shopId === shopId),
+        )}
+        dateOf={dateOf}
+        onPrint={(ids) => {
+          setPickingSheet(false);
+          setSheetIds(ids);
+          setPrinting("picked");
+        }}
+      />
 
       <LoadLorryDialog
         open={loading}

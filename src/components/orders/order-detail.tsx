@@ -4,7 +4,7 @@ import { Banknote, ClipboardCheck, FileText, PackageCheck, PackagePlus, Pencil, 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState, type ReactNode } from "react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { LineStatusBadge, OrderStatusBadge } from "@/components/ui/badge";
 import { Button, buttonClass } from "@/components/ui/button";
 import { Select } from "@/components/ui/form";
@@ -15,9 +15,9 @@ import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { useAppStore, useItemMap } from "@/lib/store";
 import type { OrderInvoice } from "@/lib/types";
 import { useDialog } from "@/lib/use-dialog";
-import { cn, formatDate, formatMoney, formatQty, invoiceTotals, lineStatus, orderLineValue, orderStatus, raigamChequeDate, round2 } from "@/lib/utils";
+import { cn, formatDate, formatMoney, daysUntil, formatQty, invoiceTotals, lineStatus, orderLineValue, orderStatus, paidByInvoice, raigamChequeDate, raigamPayments, round2 } from "@/lib/utils";
 import { invoiceName, OrderInvoiceDialog, PostToStockDialog, ReceiveOrderDialog } from "./order-dialogs";
-import { ChequeDepositPanel, OrderPaymentDetails, PayOrderDialog } from "./order-payment";
+import { ChequeDepositDate, ChequeDepositPanel, OrderPaymentDetails, OrderPaymentSummary, PayOrderDialog } from "./order-payment";
 import { OrderNotFound } from "./order-pages";
 import { ReceiveCheckSheet } from "./receive-check-sheet";
 
@@ -39,7 +39,7 @@ function InfoBlock({ icon, title, children }: { icon: ReactNode; title: string; 
 
 function NextStep({ icon, title, text, action }: { icon: ReactNode; title: string; text: string; action: ReactNode }) {
   return (
-    <div className="mb-6 flex flex-col gap-3 rounded-xl border border-brand-200 bg-brand-50 px-5 py-4 sm:flex-row sm:items-center">
+    <div className="mb-6 flex flex-col gap-3 rounded-lg border border-brand-200 bg-brand-50 px-5 py-4 sm:flex-row sm:items-center">
       <span className="grid size-10 shrink-0 place-items-center rounded-full bg-white text-brand-700 shadow-sm [&_svg]:size-5">
         {icon}
       </span>
@@ -64,6 +64,8 @@ export function OrderDetail({ id }: { id: string }) {
   const dialog = useDialog<Dialog>();
   // The invoice being edited (null = adding one), and the items to add to stock (left out = all)
   const [invoiceTarget, setInvoiceTarget] = useState<OrderInvoice | null>(null);
+  // The invoice being paid on its own (null = the whole order with one payment)
+  const [payInvoice, setPayInvoice] = useState<OrderInvoice | null>(null);
   const [postOnly, setPostOnly] = useState<string[]>();
   const [show, setShow] = useState<ItemFilter>("all");
 
@@ -98,8 +100,21 @@ export function OrderDetail({ id }: { id: string }) {
   const shown = lines.filter((l) =>
     show === "all" ? true : show === "missing" ? statusOf(l) === "Missing" : show === "extra" ? statusOf(l) === "Extra" : `inv:${l.invoiceId}` === show,
   );
+  // Paid with one payment for the whole bill, or invoice by invoice (each its own cheque), or not paid yet
+  const byInvoice = paidByInvoice(order, invoices);
   // Once the goods came, the deposit date panel offers Add cheque while nothing is paid
-  const payReminder = !!raigamChequeDate(order) && !order.paymentMethod;
+  const payReminder = !byInvoice && !!raigamChequeDate(order) && !order.paymentMethod;
+  // Paid invoice by invoice: each one's payment, to show a deposit panel for each cheque still to go
+  const invoicePayments = byInvoice ? raigamPayments([order], invoices, orderItems).filter((p) => {
+        const date = raigamChequeDate(p);
+        return p.invoice && !!date && (daysUntil(date) >= 0 || !p.paymentMethod);
+      })
+    : [];
+
+  function openPay(invoice: OrderInvoice | null) {
+    setPayInvoice(invoice);
+    dialog.open("pay");
+  }
 
   function openInvoice(invoice: OrderInvoice | null) {
     setInvoiceTarget(invoice);
@@ -135,8 +150,9 @@ export function OrderDetail({ id }: { id: string }) {
               <Button variant="outline" onClick={() => openInvoice(null)}>
                 <FileText /> Add invoice
               </Button>
-              {!payReminder && (
-                <Button variant="outline" onClick={() => dialog.open("pay")}>
+              {/* One payment for the whole bill; paid invoice by invoice, it's in the Raigam invoices table */}
+              {!payReminder && !byInvoice && (
+                <Button variant="outline" onClick={() => openPay(null)}>
                   <Banknote /> {order.paymentMethod ? "Edit payment" : "Add cheque"}
                 </Button>
               )}
@@ -174,11 +190,26 @@ export function OrderDetail({ id }: { id: string }) {
           }
         />
 
+        {/* Paid invoice by invoice: a deposit panel for each invoice's cheque not deposited yet */}
+        {invoicePayments.map((p) => (
+          <ChequeDepositPanel
+            key={p.invoice!.id}
+            order={p}
+            title={`Cheque deposit date · ${p.invoice!.invoiceNumber ? `invoice ${p.invoice!.invoiceNumber}` : "invoice (no number yet)"}`}
+            action={
+              !p.paymentMethod && (
+                <Button onClick={() => openPay(p.invoice!)}>
+                  <Banknote /> Add cheque
+                </Button>
+              )
+            }
+          />
+        ))}
         <ChequeDepositPanel
-          order={order}
+          order={byInvoice ? { ...order, receivedDate: "" } : order}
           action={
             payReminder && (
-              <Button onClick={() => dialog.open("pay")}>
+              <Button onClick={() => openPay(null)}>
                 <Banknote /> Add cheque
               </Button>
             )
@@ -249,7 +280,23 @@ export function OrderDetail({ id }: { id: string }) {
             </dl>
             <div className="border-t border-slate-200">
               <InfoBlock icon={<Banknote />} title="Payment to Raigam">
-                <OrderPaymentDetails order={order} />
+                {byInvoice ? (
+                  <>
+                    <Detail label="Paid By">
+                      <span className="text-slate-900">Invoice by invoice</span>
+                      <span className="block text-xs font-normal text-slate-500">
+                        {invoices.filter((i) => i.paymentMethod).length} of {invoices.length} paid · see the Raigam invoices below
+                      </span>
+                    </Detail>
+                    <Detail label="Not Paid Yet">
+                      <span className="tabular-nums">
+                        {formatMoney(round2(perInvoice.filter((x) => !x.invoice.paymentMethod).reduce((s, x) => s + x.total, 0)))}
+                      </span>
+                    </Detail>
+                  </>
+                ) : (
+                  <OrderPaymentDetails order={order} />
+                )}
               </InfoBlock>
             </div>
           </Card>
@@ -257,7 +304,11 @@ export function OrderDetail({ id }: { id: string }) {
           <Card>
             <CardHeader
               title={`Raigam invoices (${invoices.length})`}
-              description="Each invoice with its own discount %, as printed on it. The bill is their grand totals added up."
+              description={
+                order.paymentMethod
+                  ? "Each invoice with its own discount %, as printed on it. The bill is their grand totals added up; one payment covers them all."
+                  : "Each invoice with its own discount %, as printed on it. Pay them all with one cheque (Add cheque at the top), or each on its own cheque (Pay in the table)."
+              }
               actions={
                 <Button variant="secondary" size="sm" onClick={() => openInvoice(null)}>
                   <Plus /> Add invoice
@@ -275,6 +326,8 @@ export function OrderDetail({ id }: { id: string }) {
                   <TH className="text-right">Items Total</TH>
                   <TH className="text-right">Discount</TH>
                   <TH className="text-right">Grand Total</TH>
+                  <TH>Payment</TH>
+                  <TH>Deposit</TH>
                   <TH className="w-12">
                     <span className="sr-only">Edit</span>
                   </TH>
@@ -283,7 +336,7 @@ export function OrderDetail({ id }: { id: string }) {
               <TBody>
                 {perInvoice.length === 0 && (
                   <TR>
-                    <TD colSpan={9} className="py-6 text-center text-slate-500">
+                    <TD colSpan={11} className="py-6 text-center text-slate-500">
                       No invoices yet. They&apos;re added with Receive order when the goods come, or with Add invoice.
                     </TD>
                   </TR>
@@ -311,6 +364,27 @@ export function OrderDetail({ id }: { id: string }) {
                     </TD>
                     <TD className="text-right font-semibold text-slate-900 tabular-nums">{formatMoney(total)}</TD>
                     <TD onClick={(e) => e.stopPropagation()}>
+                      {order.paymentMethod ? (
+                        // One payment covers the whole bill
+                        <span className="text-xs text-slate-500">With the order&apos;s payment</span>
+                      ) : invoice.paymentMethod ? (
+                        <button type="button" onClick={() => openPay(invoice)} className="text-left hover:underline" title="Change this invoice's payment">
+                          <OrderPaymentSummary order={{ ...invoice, receivedDate: order.receivedDate, totalBillAmount: total }} />
+                        </button>
+                      ) : (
+                        <Button variant="outline" size="sm" onClick={() => openPay(invoice)} title="Pay this invoice on its own cheque">
+                          <Banknote /> Pay
+                        </Button>
+                      )}
+                    </TD>
+                    <TD>
+                      {byInvoice ? (
+                        <ChequeDepositDate order={{ ...invoice, receivedDate: order.receivedDate, totalBillAmount: total }} />
+                      ) : (
+                        <span className="text-slate-400">—</span>
+                      )}
+                    </TD>
+                    <TD onClick={(e) => e.stopPropagation()}>
                       <Button variant="ghost" size="icon" onClick={() => openInvoice(invoice)} aria-label={`Edit ${invoiceName(invoice, n)}`} title="Edit">
                         <Pencil />
                       </Button>
@@ -324,6 +398,7 @@ export function OrderDetail({ id }: { id: string }) {
                     <TD className="text-right tabular-nums">{formatMoney(sums.linesTotal)}</TD>
                     <TD className="text-right tabular-nums">{formatMoney(sums.discount)}</TD>
                     <TD className="text-right text-slate-900 tabular-nums">{formatMoney(sums.total)}</TD>
+                    <TD colSpan={2} />
                     <TD />
                   </TR>
                 )}
@@ -461,7 +536,13 @@ export function OrderDetail({ id }: { id: string }) {
       <ReceiveCheckSheet orderRef={order.orderId} orderDate={order.orderDate} requiredDate={order.requiredDate} lines={lines} />
 
       <ReceiveOrderDialog order={order} lines={lines} open={dialog.target === "receive"} onClose={dialog.close} />
-      <PayOrderDialog order={order} open={dialog.target === "pay"} onClose={dialog.close} />
+      <PayOrderDialog
+        order={order}
+        invoice={payInvoice}
+        amount={payInvoice ? invoiceOf.get(payInvoice.id)?.total : undefined}
+        open={dialog.target === "pay"}
+        onClose={dialog.close}
+      />
       <OrderInvoiceDialog order={order} invoice={invoiceTarget} lines={lines} open={dialog.target === "invoice"} onClose={dialog.close} />
       <PostToStockDialog order={order} lines={lines} only={postOnly} open={dialog.target === "post"} onClose={dialog.close} />
 

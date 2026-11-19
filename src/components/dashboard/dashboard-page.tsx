@@ -25,11 +25,12 @@ import {
   orderStatus,
   RAIGAM_CHEQUE_DAYS,
   raigamChequeDate,
+  raigamPayments,
   todayISO,
 } from "@/lib/utils";
 
 function SectionLabel({ children }: { children: ReactNode }) {
-  return <h2 className="mb-3 text-xs font-semibold tracking-wider text-slate-500 uppercase">{children}</h2>;
+  return <h2 className="mb-3 text-xs font-medium text-slate-500">{children}</h2>;
 }
 
 function CardLink({ href, children }: { href: string; children: ReactNode }) {
@@ -64,7 +65,7 @@ function StatCard({
   return (
     <Link
       href={href}
-      className="group flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-5 shadow-sm transition-shadow hover:shadow-md"
+      className="group flex flex-col gap-3 rounded-lg border border-slate-200 bg-white p-5 shadow-sm transition-shadow hover:shadow-md"
     >
       <div className="flex items-center justify-between">
         <span className="text-sm font-medium text-slate-500">{label}</span>
@@ -79,6 +80,7 @@ function StatCard({
 export function DashboardPage() {
   const orders = useAppStore((s) => s.orders);
   const orderItems = useAppStore((s) => s.orderItems);
+  const orderInvoices = useAppStore((s) => s.orderInvoices);
   const stock = useAppStore((s) => s.stock);
   const itemMap = useItemMap();
   const orderMap = useOrderMap();
@@ -93,9 +95,10 @@ export function DashboardPage() {
 
   const actionOrders = [...toPost, ...pending].sort((a, b) => a.orderDate.localeCompare(b.orderDate));
   // Our cheques to Raigam still to be deposited (and late ones with nothing paid), soonest first
-  const cheques = orders
-    .map((o) => ({ order: o, date: raigamChequeDate(o) }))
-    .filter(({ order, date }) => date && (daysUntil(date) >= 0 || !order.paymentMethod))
+  // (one per order, or one per invoice when its invoices are paid one by one)
+  const cheques = raigamPayments(orders, orderInvoices, orderItems)
+    .map((p) => ({ payment: p, date: raigamChequeDate(p) }))
+    .filter(({ payment, date }) => date && (daysUntil(date) >= 0 || !payment.paymentMethod))
     .sort((a, b) => a.date.localeCompare(b.date));
   const qtyFor = (orderId: string) => orderItems.filter((l) => l.orderId === orderId).reduce((s, l) => s + l.orderedQty, 0);
 
@@ -214,7 +217,12 @@ export function DashboardPage() {
                     </TD>
                     <TD className="whitespace-normal">
                       {shopMap.get(s.shopId)?.shopName ?? "Deleted store"}
-                      <span className="block text-xs text-slate-500">{shopMap.get(s.shopId)?.phone}</span>
+                      {shopMap.get(s.shopId)?.phone && (
+                        // Tap to call on a phone
+                        <a href={`tel:${shopMap.get(s.shopId)!.phone.replace(/[^\d+]/g, "")}`} className="block text-xs text-brand-700 hover:underline">
+                          {shopMap.get(s.shopId)!.phone}
+                        </a>
+                      )}
                     </TD>
                     <TD className="text-right font-semibold tabular-nums">{formatMoney(d.due)}</TD>
                     <TD>
@@ -286,20 +294,20 @@ export function DashboardPage() {
                 </tr>
               </THead>
               <TBody>
-                {cheques.map(({ order: o, date }) => (
-                  <TR key={o.id} className={cn(daysUntil(date) <= CHEQUE_REMIND_DAYS && "bg-amber-50/50")}>
+                {cheques.map(({ payment: p, date }) => (
+                  <TR key={p.invoice?.id ?? p.order.id} className={cn(daysUntil(date) <= CHEQUE_REMIND_DAYS && "bg-amber-50/50")}>
                     <TD className="font-semibold text-brand-700">
-                      <Link href={`/orders/${o.id}`} className="hover:underline">
-                        {o.orderId}
+                      <Link href={`/orders/${p.order.id}`} className="hover:underline">
+                        {p.label}
                       </Link>
                     </TD>
-                    <TD className="tabular-nums">{formatDate(o.receivedDate)}</TD>
-                    <TD>{o.paymentMethod ? o.chequeNumber : <span className="text-amber-700">Not entered yet</span>}</TD>
-                    <TD className="text-right font-semibold tabular-nums">{formatMoney(o.totalBillAmount)}</TD>
+                    <TD className="tabular-nums">{formatDate(p.receivedDate)}</TD>
+                    <TD>{p.paymentMethod ? p.chequeNumber : <span className="text-amber-700">Not entered yet</span>}</TD>
+                    <TD className="text-right font-semibold tabular-nums">{formatMoney(p.totalBillAmount)}</TD>
                     <TD className="tabular-nums">
                       {formatDate(date)}
                       <span className="block text-xs">
-                        <ChequeCountdown order={o} />
+                        <ChequeCountdown order={p} />
                       </span>
                     </TD>
                   </TR>

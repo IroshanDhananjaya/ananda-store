@@ -83,7 +83,7 @@ export function ProfitPage() {
       />
 
       {noCost.length > 0 && (
-        <p className="mb-6 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+        <p className="mb-6 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
           <AlertTriangle className="mt-0.5 size-4 shrink-0" />
           <span>
             {noCost.length} bill line{noCost.length > 1 ? "s" : ""} in {periodLabel} {noCost.length > 1 ? "have" : "has"} items with no cost price, so

@@ -2,7 +2,7 @@
 
 import { AlertTriangle, ArrowRight, ChevronDown, CloudDownload, Loader2, Store } from "lucide-react";
 import { Fragment, useMemo, useState, type ComponentProps, type FormEvent, type ReactNode } from "react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { DateRangePicker } from "@/components/ui/date-range-picker";
@@ -269,7 +269,7 @@ function RaigamTotals({ bills }: { bills: RaigamBill[] }) {
   ];
   return (
     <section>
-      <h3 className="mb-2 text-xs font-medium tracking-wide text-slate-500 uppercase">On Raigam for these dates</h3>
+      <h3 className="mb-2 text-xs font-medium text-slate-500">On Raigam for these dates</h3>
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
         {tabs.map((t) => (
           <div key={t.label} className={cn("rounded-lg border border-slate-200 px-3 py-2", t.bills.length === 0 && "opacity-60")}>
@@ -501,7 +501,7 @@ function BillRows({ rows, plan, data }: { rows: SyncRow[]; plan: SyncPlan; data:
       )}
       <StackBox>
         <table className="w-full text-sm">
-          <thead className="bg-slate-50 text-left text-xs font-semibold tracking-wide text-slate-500 uppercase">
+          <thead className="bg-slate-50 text-left text-xs font-medium text-slate-500">
             <tr>
               <th className="px-3 py-2">Invoice</th>
               <th className="px-3 py-2">Store</th>
@@ -658,7 +658,7 @@ function ChangeDetails({
   return (
     <div className="flex flex-col gap-1.5 text-xs">
       <table className="w-full">
-        <thead className="text-left text-[11px] font-semibold tracking-wide text-slate-500 uppercase">
+        <thead className="text-left text-xs font-medium text-slate-500">
           <tr>
             <th className="w-2/5 py-1 pr-3">What changes</th>
             <th className="py-1">Here now → from Raigam</th>

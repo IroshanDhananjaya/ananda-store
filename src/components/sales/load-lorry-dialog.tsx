@@ -2,7 +2,7 @@
 
 import { AlertTriangle, PackageX, Truck } from "lucide-react";
 import { Fragment, useEffect, useMemo, useState, type FormEvent } from "react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select, toNumber } from "@/components/ui/form";
 import { Modal } from "@/components/ui/modal";
@@ -288,7 +288,7 @@ function LoadForm({
         <div className="overflow-hidden rounded-lg border border-slate-200">
           <StackBox>
             <table className="w-full text-sm">
-              <thead className="bg-slate-50 text-left text-xs font-semibold tracking-wide text-slate-500 uppercase">
+              <thead className="bg-slate-50 text-left text-xs font-medium text-slate-500">
                 <tr>
                   <th className="w-10 px-3 py-2">
                     <input
@@ -380,7 +380,7 @@ function LoadForm({
             <div className="overflow-hidden rounded-lg border border-slate-200">
               <StackBox>
                 <table className="w-full text-sm">
-                  <thead className="bg-slate-50 text-left text-xs font-semibold tracking-wide text-slate-500 uppercase">
+                  <thead className="bg-slate-50 text-left text-xs font-medium text-slate-500">
                     <tr>
                       <th className="px-3 py-2">Item</th>
                       <th className="px-3 py-2">Location</th>
@@ -529,7 +529,7 @@ function LoadForm({
             </ul>
             {anywayBills.length > 0 && (
               <div>
-                <p className="mb-1 text-xs font-semibold tracking-wide text-slate-500 uppercase">Bills reduced</p>
+                <p className="mb-1 text-xs font-medium text-slate-500">Bills reduced</p>
                 <ul className="flex flex-col gap-0.5 text-xs">
                   {anywayBills.map((b) => (
                     <li key={b.sale.id} className="flex justify-between gap-3">

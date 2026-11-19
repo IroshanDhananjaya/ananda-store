@@ -3,7 +3,7 @@
 import { CircleCheck, Undo2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { ChequeStatusBadge } from "@/components/payments/cheque-status-field";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";

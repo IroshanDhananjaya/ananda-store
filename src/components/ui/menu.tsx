@@ -133,7 +133,7 @@ export function Menu({
           role="menu"
           aria-label={ariaLabel}
           onKeyDown={onListKey}
-          className="fixed z-[60] w-max max-w-[min(20rem,calc(100vw-1rem))] min-w-52 rounded-xl border border-slate-200 bg-white py-1 shadow-xl"
+          className="fixed z-[60] w-max max-w-[min(20rem,calc(100vw-1rem))] min-w-52 rounded-lg border border-slate-200 bg-white py-1 shadow-xl"
         >
           {list.map((e, i) =>
             "heading" in e ? (
@@ -142,7 +142,7 @@ export function Menu({
                 role="presentation"
                 className={cn(
                   i > 0 && "mt-1 border-t border-slate-100",
-                  e.heading && "px-3 pt-2 pb-1 text-[11px] font-semibold tracking-wide text-slate-500 uppercase",
+                  e.heading && "px-3 pt-2 pb-1 text-xs font-medium text-slate-500",
                   e.until && hiddenFrom[e.until],
                 )}
               >

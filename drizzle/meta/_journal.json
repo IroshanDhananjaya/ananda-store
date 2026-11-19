@@ -169,6 +169,13 @@
       "when": 1793468921500,
       "tag": "0023_free_claims",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1795107950618,
+      "tag": "0024_invoice_payment",
+      "breakpoints": true
     }
   ]
 }

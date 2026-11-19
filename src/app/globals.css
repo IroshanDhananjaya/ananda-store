@@ -1,23 +1,36 @@
 @import "tailwindcss";
 
 @theme inline {
-  --font-sans: var(--font-geist-sans);
+  --font-sans: var(--font-inter);
   --font-mono: var(--font-geist-mono);
   --font-slab: var(--font-roboto-slab);
 }
 
 @theme {
-  /* Brand blue: the Ananda Stores logo's "A" (light #01a1f4 to navy #002362) */
-  --color-brand-50: #eef6ff;
-  --color-brand-100: #d9ebff;
-  --color-brand-200: #b9dbff;
-  --color-brand-300: #86c3fd;
-  --color-brand-400: #3fa3f6;
-  --color-brand-500: #0b85e8;
-  --color-brand-600: #0a63c9;
-  --color-brand-700: #0a4ea3;
-  --color-brand-800: #083d84;
-  --color-brand-900: #062a5f;
+  /* Accent: a calm indigo (buttons, links, focus, selection), Linear-style */
+  --color-brand-50: #f2f3fd;
+  --color-brand-100: #e5e7fb;
+  --color-brand-200: #cdd0f6;
+  --color-brand-300: #a9aeee;
+  --color-brand-400: #8189e2;
+  --color-brand-500: #6570d8;
+  --color-brand-600: #5e6ad2;
+  --color-brand-700: #4c56b8;
+  --color-brand-800: #3e4696;
+  --color-brand-900: #343a78;
+
+  /* Greys: neutral (not blue-tinted), as in Linear. Every page's slate-* classes use these. */
+  --color-slate-50: #f9f9fa;
+  --color-slate-100: #f2f2f4;
+  --color-slate-200: #e6e6ea;
+  --color-slate-300: #d4d4da;
+  --color-slate-400: #a0a0a9;
+  --color-slate-500: #73737d;
+  --color-slate-600: #5a5a64;
+  --color-slate-700: #3d3d45;
+  --color-slate-800: #26262b;
+  --color-slate-900: #18181b;
+  --color-slate-950: #0f0f11;
 
   /* Accent orange: the logo's swoosh and cart (#fd6a04). Small text uses 700 for contrast. */
   --color-accent-50: #fff6ed;
@@ -38,6 +51,7 @@
 body {
   background: var(--color-slate-50);
   color: var(--color-slate-900);
+  font-feature-settings: "cv11", "ss01";
 }
 
 html[data-modal-open="true"] {
@@ -57,21 +71,21 @@ html[data-modal-open="true"] {
   [data-theme="dark"] {
     color-scheme: dark;
 
-    --color-slate-50: #0b1220;
-    --color-slate-100: #162033;
-    --color-slate-200: #253147;
-    --color-slate-300: #34425a;
-    --color-slate-400: #6b7a93;
-    --color-slate-500: #93a1b6;
-    --color-slate-600: #b2bdcd;
-    --color-slate-700: #c9d2de;
-    --color-slate-800: #e0e6ee;
-    --color-slate-900: #f1f4f8;
-    --color-slate-950: #f8fafc;
+    --color-slate-50: #0d0e10;
+    --color-slate-100: #18191c;
+    --color-slate-200: #24252a;
+    --color-slate-300: #303137;
+    --color-slate-400: #5f6068;
+    --color-slate-500: #8a8b94;
+    --color-slate-600: #a8a9b1;
+    --color-slate-700: #c3c4ca;
+    --color-slate-800: #dcdde1;
+    --color-slate-900: #ededf0;
+    --color-slate-950: #f7f7f8;
 
-    --color-brand-50: #0e1f3a;
-    --color-brand-100: #13294b;
-    --color-brand-200: #1d3c6b;
+    --color-brand-50: #1a1b31;
+    --color-brand-100: #212343;
+    --color-brand-200: #2d305c;
     --color-accent-50: #2c1a0c;
     --color-accent-100: #3d240e;
     --color-accent-200: #5e3614;
@@ -90,13 +104,7 @@ html[data-modal-open="true"] {
     --color-sky-200: #144866;
 
     /* Cards, boxes and menus */
-    --surface: #111a2b;
-  }
-
-  /* The sidebar is dark in both themes: its light blue text keeps its colours */
-  [data-theme="dark"] aside {
-    --color-brand-100: #d9ebff;
-    --color-brand-200: #b9dbff;
+    --surface: #141518;
   }
 
   [data-theme="dark"] .bg-white {
@@ -114,10 +122,10 @@ html[data-modal-open="true"] {
 
   /* Dark in both themes: the "Saving…" pill, and the shade behind dialogs and the phone menu */
   [data-theme="dark"] .bg-slate-900 {
-    background-color: #1e293b;
+    background-color: #26272c;
   }
   [data-theme="dark"] :is(.bg-slate-900\/40, .bg-slate-900\/50) {
-    background-color: rgb(2 6 23 / 0.65);
+    background-color: rgb(0 0 0 / 0.6);
   }
 
   /* Coloured text, readable on dark */
@@ -146,10 +154,10 @@ html[data-modal-open="true"] {
     color: #7dd3fc;
   }
   [data-theme="dark"] :is(.text-brand-600, .text-brand-700) {
-    color: #6cb6ff;
+    color: #9aa1f2;
   }
   [data-theme="dark"] :is(.text-brand-800, .text-brand-900) {
-    color: #a3d0ff;
+    color: #bcc0f7;
   }
   [data-theme="dark"] :is(.text-accent-700, .text-accent-800) {
     color: #ffa463;

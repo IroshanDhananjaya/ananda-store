@@ -4,12 +4,13 @@ import { cn } from "@/lib/utils";
 
 type Tone = "green" | "amber" | "red" | "blue" | "slate";
 
+// Linear-style: a quiet outlined pill; the dot carries the colour (red text too, so problems stand out)
 const tones: Record<Tone, string> = {
-  green: "bg-emerald-50 text-emerald-700 ring-emerald-600/20",
-  amber: "bg-amber-50 text-amber-800 ring-amber-600/25",
-  red: "bg-red-50 text-red-700 ring-red-600/20",
-  blue: "bg-sky-50 text-sky-700 ring-sky-600/20",
-  slate: "bg-slate-100 text-slate-600 ring-slate-500/20",
+  green: "text-slate-700",
+  amber: "text-slate-700",
+  red: "text-red-700",
+  blue: "text-slate-700",
+  slate: "text-slate-500",
 };
 
 const dots: Record<Tone, string> = {
@@ -24,7 +25,7 @@ export function Badge({ tone = "slate", children, className }: { tone?: Tone; ch
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium whitespace-nowrap ring-1 ring-inset",
+        "inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2 py-px text-xs font-medium whitespace-nowrap",
         tones[tone],
         className,
       )}
@@ -100,7 +101,7 @@ export function DayChips({ days }: { days: string[] }) {
   return (
     <span className="inline-flex flex-wrap gap-1">
       {days.map((d) => (
-        <span key={d} className="rounded bg-brand-50 px-1.5 py-0.5 text-xs font-medium text-brand-800">
+        <span key={d} className="rounded border border-slate-200 px-1.5 py-px text-xs font-medium text-slate-600">
           {d}
         </span>
       ))}

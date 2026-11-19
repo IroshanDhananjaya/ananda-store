@@ -2,14 +2,14 @@
 
 import { CalendarClock } from "lucide-react";
 import { useState, type FormEvent, type ReactNode } from "react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select } from "@/components/ui/form";
 import { Detail } from "@/components/ui/layout";
 import { Modal } from "@/components/ui/modal";
 import { useAppStore } from "@/lib/store";
-import { PAYMENT_METHODS, type Order, type OrderPayment, type PaymentMethod } from "@/lib/types";
+import { PAYMENT_METHODS, type Order, type OrderInvoice, type OrderPayment, type PaymentMethod } from "@/lib/types";
 import {
   addDays,
   CHEQUE_REMIND_DAYS,
@@ -20,21 +20,23 @@ import {
   invoiceNumbersOf,
   NOT_PAID,
   paymentOf,
+  type PayTarget,
   RAIGAM_CHEQUE_DAYS,
   raigamChequeDate,
   todayISO,
   weekdayOf,
 } from "@/lib/utils";
 
-// How a Raigam bill was paid: one payment per load (Cash, Cheque or Bank Transfer), or not paid yet.
-// Raigam deposits the cheque 21 days after the goods come; the app counts the days down.
+// How a Raigam bill was paid: one payment for the whole order (Cash, Cheque or Bank Transfer), or each
+// of its invoices paid on its own, or not paid yet. Raigam deposits the cheque 21 days after the goods
+// come; the app counts the days down. These parts take a PayTarget: an order, or one invoice of it.
 
 /**
  * When Raigam deposits the cheque and the days left: blue while there's time, amber within the 5
  * reminder days, red on the last day or when the date has passed with no payment entered, grey
  * once deposited. null for orders not received yet or paid another way.
  */
-function depositState(order: Order) {
+function depositState(order: PayTarget) {
   const date = raigamChequeDate(order);
   if (!date) return null;
   const days = daysUntil(date);
@@ -47,13 +49,13 @@ function depositState(order: Order) {
 const countdownText = { blue: "text-sky-700", amber: "font-medium text-amber-700", red: "font-medium text-red-600", slate: "text-slate-500" };
 
 /** Days until Raigam deposits the cheque, as coloured words ("21 days left", "Today", "3 days late") */
-export function ChequeCountdown({ order }: { order: Order }) {
+export function ChequeCountdown({ order }: { order: PayTarget }) {
   const s = depositState(order);
   return s && <span className={countdownText[s.tone]}>{s.text}</span>;
 }
 
 /** The deposit date in bold with a days-left badge; "—" when there's none (not received yet, or paid by cash / transfer) */
-export function ChequeDepositDate({ order, large = false }: { order: Order; large?: boolean }) {
+export function ChequeDepositDate({ order, large = false }: { order: PayTarget; large?: boolean }) {
   const s = depositState(order);
   if (!s) return <span className="text-slate-400">—</span>;
   return (
@@ -182,7 +184,7 @@ export function OrderPaymentFields({
 }
 
 /** "Not paid", or the method with its paid / cheque given date and reference (the deposit date has its own column) */
-export function OrderPaymentSummary({ order }: { order: Order }) {
+export function OrderPaymentSummary({ order }: { order: PayTarget }) {
   if (!order.paymentMethod) return <span className="font-medium text-amber-700">Not paid</span>;
   const cheque = order.paymentMethod === "Cheque";
   return (
@@ -209,7 +211,7 @@ const panelTones = {
  * time, amber in the 5 reminder days, red on the last day or when late with nothing paid, grey once deposited.
  * `action`: e.g. an Add cheque button while no payment is entered.
  */
-export function ChequeDepositPanel({ order, action }: { order: Order; action?: ReactNode }) {
+export function ChequeDepositPanel({ order, action, title = "Cheque deposit date" }: { order: PayTarget; action?: ReactNode; title?: string }) {
   const date = raigamChequeDate(order);
   if (!date) return null;
   const days = daysUntil(date);
@@ -223,13 +225,13 @@ export function ChequeDepositPanel({ order, action }: { order: Order; action?: R
     days >= 0 ? (days === 0 ? ["Today", "deposit day"] : [String(days), days === 1 ? "day left" : "days left"]) : paid ? ["Done", `deposited ${-days} day${days === -1 ? "" : "s"} ago`] : [String(-days), days === -1 ? "day late" : "days late"];
 
   return (
-    <section className={cn("mb-6 rounded-xl border px-5 py-4 shadow-sm", t.box)} aria-label="Cheque deposit date">
+    <section className={cn("mb-6 rounded-lg border px-5 py-4 shadow-sm", t.box)} aria-label="Cheque deposit date">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
         <span className={cn("grid size-12 shrink-0 place-items-center rounded-full bg-white shadow-sm", t.icon)}>
           <CalendarClock className="size-6" />
         </span>
         <div className={cn("min-w-0 flex-1", t.text)}>
-          <p className="text-xs font-semibold tracking-wider uppercase opacity-70">Cheque deposit date</p>
+          <p className="text-xs font-semibold opacity-70">{title}</p>
           <p className="mt-0.5 text-2xl font-bold tracking-tight tabular-nums sm:text-3xl">
             {weekdayOf(date)}, {formatDate(date)}
           </p>
@@ -296,13 +298,15 @@ export function OrderPaymentDetails({ order }: { order: Order }) {
   );
 }
 
-function PayOrderForm({ order, onDone }: { order: Order; onDone: () => void }) {
+function PayOrderForm({ order, invoice, onDone }: { order: Order; invoice?: OrderInvoice; onDone: () => void }) {
   const payOrder = useAppStore((s) => s.payOrder);
+  const payOrderInvoice = useAppStore((s) => s.payOrderInvoice);
+  const saved = invoice ?? order;
   // Raigam is usually paid by cheque, so a new payment starts as one (the method can still be changed),
   // deposited 21 days after the goods came
   const [payment, setPayment] = useState<OrderPayment>(() =>
-    order.paymentMethod
-      ? paymentOf(order)
+    saved.paymentMethod
+      ? paymentOf(saved)
       : { ...NOT_PAID, paymentMethod: "Cheque", paidDate: todayISO(), chequeDepositDate: addDays(order.receivedDate, RAIGAM_CHEQUE_DAYS) },
   );
   const [errors, setErrors] = useState<OrderPaymentErrors>({});
@@ -312,12 +316,13 @@ function PayOrderForm({ order, onDone }: { order: Order; onDone: () => void }) {
     const next = orderPaymentErrors(payment);
     setErrors(next);
     if (Object.keys(next).length) return;
-    const result = await payOrder(order.id, payment);
+    const result = invoice ? await payOrderInvoice(order.id, invoice.id, payment) : await payOrder(order.id, payment);
     if (!result.ok) {
       toast.error(result.error);
       return;
     }
-    toast.success(payment.paymentMethod ? `${order.orderId} marked as paid` : `${order.orderId} marked as not paid`);
+    const what = invoice ? `Invoice ${invoice.invoiceNumber || "(no number)"}` : order.orderId;
+    toast.success(payment.paymentMethod ? `${what} marked as paid` : `${what} marked as not paid`);
     onDone();
   }
 
@@ -328,15 +333,35 @@ function PayOrderForm({ order, onDone }: { order: Order; onDone: () => void }) {
   );
 }
 
-/** Record or change how a Raigam bill was paid (also for posted orders) */
-export function PayOrderDialog({ order, open, onClose }: { order: Order; open: boolean; onClose: () => void }) {
+/**
+ * Record or change how a Raigam bill was paid (also for posted orders): the whole order with one
+ * payment, or (`invoice`) just that invoice, with its own cheque. `amount`: the invoice's grand total.
+ */
+export function PayOrderDialog({
+  order,
+  invoice,
+  amount,
+  open,
+  onClose,
+}: {
+  order: Order;
+  invoice?: OrderInvoice | null;
+  amount?: number;
+  open: boolean;
+  onClose: () => void;
+}) {
   const invoices = invoiceNumbersOf(order, useAppStore((s) => s.orderInvoices));
+  const name = invoice ? `invoice ${invoice.invoiceNumber || "(no number yet)"}` : order.orderId;
   return (
     <Modal
       open={open}
       onClose={onClose}
-      title={order.paymentMethod ? `Edit payment for ${order.orderId}` : `Add cheque or payment for ${order.orderId}`}
-      description={`Bill amount ${formatMoney(order.totalBillAmount)}${invoices ? ` · invoice ${invoices}` : ""}`}
+      title={(invoice ?? order).paymentMethod ? `Edit payment for ${name}` : `Add cheque or payment for ${name}`}
+      description={
+        invoice
+          ? `${order.orderId} · this invoice's total ${formatMoney(amount ?? 0)} · paid on its own cheque`
+          : `Bill amount ${formatMoney(order.totalBillAmount)}${invoices ? ` · invoice ${invoices}` : ""}`
+      }
       footer={
         <>
           <Button variant="outline" onClick={onClose}>
@@ -349,7 +374,7 @@ export function PayOrderDialog({ order, open, onClose }: { order: Order; open: b
       }
     >
       {/* Modal mounts this only while open, so it starts from the saved payment each time */}
-      <PayOrderForm order={order} onDone={onClose} />
+      <PayOrderForm order={order} invoice={invoice ?? undefined} onDone={onClose} />
     </Modal>
   );
 }

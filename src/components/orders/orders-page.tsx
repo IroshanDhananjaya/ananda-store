@@ -4,7 +4,7 @@ import { Eye, PackagePlus, Pencil, Plus, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { OrderStatusBadge } from "@/components/ui/badge";
 import { Button, buttonClass } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -16,7 +16,7 @@ import { EmptyRow, RowActions, Table, TBody, TD, TH, THead, TR } from "@/compone
 import { useAppStore } from "@/lib/store";
 import type { Order, OrderStatus } from "@/lib/types";
 import { useDialog } from "@/lib/use-dialog";
-import { CHEQUE_REMIND_DAYS, cn, daysUntil, formatDate, formatMoney, formatQty, includesText, invoiceNumbersOf, orderStatus, RAIGAM_CHEQUE_DAYS, raigamChequeDate } from "@/lib/utils";
+import { CHEQUE_REMIND_DAYS, cn, daysUntil, formatDate, formatMoney, formatQty, includesText, invoiceNumbersOf, orderStatus, paidByInvoice, RAIGAM_CHEQUE_DAYS, raigamChequeDate, raigamPayments } from "@/lib/utils";
 import { ChequeDepositDate, OrderPaymentSummary } from "./order-payment";
 
 type StatusFilter = "all" | OrderStatus;
@@ -50,20 +50,32 @@ export function OrdersPage() {
   const invoicesOf = (o: Order) => orderInvoices.filter((i) => i.orderId === o.orderId);
   // Some items in stock: locked like a posted order
   const locked = (o: Order) => statusOf(o) === "Posted" || statusOf(o) === "Partial";
-  // The cheque is deposited within the reminder days, or late with nothing paid
-  const depositSoon = (o: Order) => {
-    const date = raigamChequeDate(o);
-    return !!date && daysUntil(date) <= CHEQUE_REMIND_DAYS && (daysUntil(date) >= 0 || !o.paymentMethod);
-  };
+  // Its payments: the order's one, or each invoice's when they're paid one by one
+  const paymentsOf = (o: Order) => raigamPayments([o], orderInvoices, orderItems);
+  // A cheque is deposited within the reminder days, or late with nothing paid
+  const depositSoon = (o: Order) =>
+    paymentsOf(o).some((p) => {
+      const date = raigamChequeDate(p);
+      return !!date && daysUntil(date) <= CHEQUE_REMIND_DAYS && (daysUntil(date) >= 0 || !p.paymentMethod);
+    });
+  // The next cheque to watch: the soonest still to deposit, or the soonest late with nothing paid
+  const nextCheque = (o: Order) =>
+    paymentsOf(o)
+      .map((p) => ({ p, date: raigamChequeDate(p) }))
+      .filter(({ p, date }) => date && (daysUntil(date) >= 0 || !p.paymentMethod))
+      .sort((a, b) => a.date.localeCompare(b.date))[0]?.p;
 
   const rows = datedOrders
     .filter((o) => status === "all" || statusOf(o) === status || (status === "Received" && statusOf(o) === "Partial"))
     .filter((o) =>
-      includesText([o.orderId, ...invoicesOf(o).flatMap((i) => [i.invoiceNumber, i.poNumber, i.company]), o.chequeNumber, o.paymentReference], query),
+      includesText(
+        [o.orderId, ...invoicesOf(o).flatMap((i) => [i.invoiceNumber, i.poNumber, i.company, i.chequeNumber, i.paymentReference]), o.chequeNumber, o.paymentReference],
+        query,
+      ),
     )
     .sort((a, b) => b.orderId.localeCompare(a.orderId));
   const billTotal = rows.reduce((sum, o) => sum + o.totalBillAmount, 0);
-  const notPaid = rows.reduce((sum, o) => sum + (o.paymentMethod ? 0 : o.totalBillAmount), 0);
+  const notPaid = rows.reduce((sum, o) => sum + paymentsOf(o).reduce((s, p) => s + (p.paymentMethod ? 0 : p.totalBillAmount), 0), 0);
 
   const pager = usePagination(rows, [query, status, range, dateBy]);
 
@@ -156,10 +168,29 @@ export function OrdersPage() {
                   )}
                 </TD>
                 <TD className="tabular-nums">
-                  <OrderPaymentSummary order={o} />
+                  {paidByInvoice(o, orderInvoices) ? (
+                    // Each invoice paid on its own
+                    (() => {
+                      const ps = paymentsOf(o);
+                      const paid = ps.filter((p) => p.paymentMethod).length;
+                      return (
+                        <>
+                          <span className={cn("font-medium", paid === ps.length ? "text-emerald-700" : "text-amber-700")}>
+                            {paid} of {ps.length} invoices paid
+                          </span>
+                          <span className="block text-xs font-normal text-slate-500">Paid invoice by invoice</span>
+                        </>
+                      );
+                    })()
+                  ) : (
+                    <OrderPaymentSummary order={o} />
+                  )}
                 </TD>
                 <TD>
-                  <ChequeDepositDate order={o} />
+                  {(() => {
+                    const next = nextCheque(o);
+                    return next ? <ChequeDepositDate order={next} /> : <ChequeDepositDate order={o} />;
+                  })()}
                 </TD>
                 <TD className="text-right tabular-nums">{formatQty(qtyByOrder.get(o.orderId) ?? 0)}</TD>
                 <TD className="text-right font-medium text-slate-900 tabular-nums">{formatMoney(o.totalBillAmount)}</TD>

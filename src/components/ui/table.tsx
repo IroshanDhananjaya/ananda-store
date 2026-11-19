@@ -46,40 +46,40 @@ export function Table({ className, children }: { className?: string; children: R
   // scroll box; otherwise they widen the whole page on small screens.
   return (
     <StackBox className={cn("relative overflow-x-auto", className)}>
-      <table className="w-full border-collapse text-sm">{children}</table>
+      <table className="w-full border-collapse text-[13px]">{children}</table>
     </StackBox>
   );
 }
 
 export function THead({ children }: { children: ReactNode }) {
   return (
-    <thead className="bg-brand-700 text-left text-xs font-semibold tracking-wide text-white uppercase">
+    <thead className="border-b border-slate-200 bg-slate-50 text-left text-xs font-medium text-slate-500">
       {children}
     </thead>
   );
 }
 
 export function TH({ className, ...props }: ComponentProps<"th">) {
-  return <th className={cn("px-3 py-2.5 font-semibold whitespace-nowrap first:pl-5 last:pr-5", className)} {...props} />;
+  return <th className={cn("px-3 py-2 font-medium whitespace-nowrap first:pl-4 last:pr-4", className)} {...props} />;
 }
 
 export function TBody({ children }: { children: ReactNode }) {
-  return <tbody className="divide-y divide-slate-200 bg-white">{children}</tbody>;
+  return <tbody className="divide-y divide-slate-100 bg-white">{children}</tbody>;
 }
 
 export function TR({ className, ...props }: ComponentProps<"tr">) {
-  return <tr className={cn("transition-colors hover:bg-brand-50/60", className)} {...props} />;
+  return <tr className={cn("transition-colors hover:bg-slate-50", className)} {...props} />;
 }
 
 export function TD({ className, ...props }: ComponentProps<"td">) {
-  return <td className={cn("px-3 py-2 whitespace-nowrap text-slate-700 first:pl-5 last:pr-5", className)} {...props} />;
+  return <td className={cn("px-3 py-2 whitespace-nowrap text-slate-700 first:pl-4 last:pr-4", className)} {...props} />;
 }
 
 /** A heading row inside a table body, e.g. the item category the rows below are under */
 export function GroupRow({ colSpan, className, children }: { colSpan: number; className?: string; children: ReactNode }) {
   return (
-    <tr className={cn("bg-slate-100", className)}>
-      <td colSpan={colSpan} className="px-5 py-1.5 text-xs font-semibold tracking-wide text-brand-800 uppercase">
+    <tr className={cn("bg-slate-50", className)}>
+      <td colSpan={colSpan} className="px-4 py-1.5 text-xs font-medium text-slate-600">
         {children}
       </td>
     </tr>

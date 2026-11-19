@@ -2,7 +2,7 @@
 
 import { Wand2 } from "lucide-react";
 import { useMemo, useState, type FormEvent } from "react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { Button } from "@/components/ui/button";
 import { Field, Input, ReadOnlyValue, Select, toNumber } from "@/components/ui/form";
 import { ChequeStatusField } from "./cheque-status-field";
@@ -206,7 +206,7 @@ function PaymentForm({
             <div className="overflow-hidden rounded-lg border border-slate-200">
               <StackBox>
                 <table className="w-full text-sm">
-                  <thead className="bg-slate-50 text-left text-xs font-semibold tracking-wide text-slate-500 uppercase">
+                  <thead className="bg-slate-50 text-left text-xs font-medium text-slate-500">
                     <tr>
                       <th className="px-3 py-2">Bill</th>
                       <th className="px-3 py-2 text-right">Cash Balance</th>

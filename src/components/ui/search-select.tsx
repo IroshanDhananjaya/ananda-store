@@ -123,6 +123,7 @@ export function SearchSelect({
   }, [open, active]);
 
   function openList() {
+    arrowed.current = false;
     setOpen(true);
     setQuery("");
     const current = options.findIndex((o) => o.value === value);
@@ -141,7 +142,11 @@ export function SearchSelect({
     close();
   }
 
+  // The highlight was moved with the arrow keys, so it is a deliberate pick
+  const arrowed = useRef(false);
+
   function move(step: 1 | -1) {
+    arrowed.current = true;
     for (let i = active + step; i >= 0 && i < shown.length; i += step) {
       if (!shown[i].disabled) return setActive(i);
     }
@@ -162,8 +167,12 @@ export function SearchSelect({
       e.preventDefault();
       close();
     } else if (e.key === "Tab" && open) {
-      // Tab takes the highlighted match, but never opens "add new" by surprise
-      if (query && shown[active]?.value !== CREATE) choose(shown[active]);
+      // Tab only takes a match that is certain: the one item that matches, or one picked with the
+      // arrow keys. Several matches and no pick: keep what was there (a wrong item on a bill is
+      // worse than having to pick). Never opens "add new" by surprise.
+      const matches = shown.filter((o) => !o.disabled && o.value !== CREATE);
+      if (query && matches.length === 1) choose(matches[0]);
+      else if (arrowed.current && shown[active]?.value !== CREATE) choose(shown[active]);
       else close();
     }
   }
@@ -228,7 +237,7 @@ export function SearchSelect({
               {o.group && o.group !== shown[i - 1]?.group && (
                 <li
                   role="presentation"
-                  className={cn("px-3 pt-2 pb-1 text-[11px] font-semibold tracking-wide text-brand-700 uppercase", i > 0 && "mt-1 border-t border-slate-100")}
+                  className={cn("px-3 pt-2 pb-1 text-xs font-medium text-slate-500", i > 0 && "mt-1 border-t border-slate-100")}
                 >
                   {o.group}
                 </li>

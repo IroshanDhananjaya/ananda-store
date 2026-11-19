@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { Button } from "@/components/ui/button";
 import { Field, Input, ReadOnlyValue, Select, toNumber } from "@/components/ui/form";
 import { SearchSelect } from "@/components/ui/search-select";

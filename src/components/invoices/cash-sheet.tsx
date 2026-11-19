@@ -2,7 +2,8 @@
 
 import { useSaleDues, useShopMap } from "@/lib/store";
 import type { Route, Sale } from "@/lib/types";
-import { cn, formatDate } from "@/lib/utils";
+import { cn } from "@/lib/utils";
+import { sheetDayLabel } from "./cash-sheet-dialog";
 
 const amount = (n: number) => n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -43,8 +44,12 @@ export function CashSheet({
 
   // Oldest day first; within a day, in invoice order like Raigam's list
   const rows = [...sales].sort((a, b) => dateOf(a).localeCompare(dateOf(b)) || (a.invoiceNo || a.saleNo).localeCompare(b.invoiceNo || b.saleNo));
-  const multiDay = new Set(rows.map(dateOf)).size > 1;
+  const days = [...Map.groupBy(rows, dateOf)];
+  // More than one day: each day's bills under its own heading, with that day's total
+  const multiDay = days.length > 1;
   const total = rows.reduce((sum, s) => sum + dues.get(s.id)!.total, 0);
+  // Numbered straight through the sheet
+  const numberOf = new Map(rows.map((s, i) => [s.id, i + 1]));
 
   return (
     <div className="hidden w-full text-[13px] text-black print:block">
@@ -97,12 +102,22 @@ export function CashSheet({
               </td>
             </tr>
           )}
-          {rows.map((s, i) => {
+          {days.map(([day, bills]) => [
+            multiDay && (
+              <tr key={`day-${day}`} className="break-inside-avoid break-after-avoid bg-slate-100 font-semibold [print-color-adjust:exact]">
+                <td colSpan={2} className={cell}>
+                  {sheetDayLabel(day)} · {bills.length} bill{bills.length === 1 ? "" : "s"}
+                </td>
+                <td className={cn(cell, "text-right tabular-nums")}>{amount(bills.reduce((sum, s) => sum + dues.get(s.id)!.total, 0))}</td>
+                <td colSpan={5} className={cell} />
+              </tr>
+            ),
+            ...bills.map((s) => {
             const d = dues.get(s.id)!;
-            const ref = [s.invoiceNo, s.saleNo, multiDay && formatDate(dateOf(s))].filter(Boolean).join(" · ");
+            const ref = [s.invoiceNo, s.saleNo].filter(Boolean).join(" · ");
             return (
               <tr key={s.id} className="h-[11mm] break-inside-avoid">
-                <td className={cn(cell, "text-center")}>{i + 1}</td>
+                <td className={cn(cell, "text-center")}>{numberOf.get(s.id)}</td>
                 <td className={cell}>
                   <span className="block">{shopMap.get(s.shopId)?.shopName ?? "Deleted store"}</span>
                   <span className="block text-[10px] text-slate-600">{ref}</span>
@@ -118,7 +133,8 @@ export function CashSheet({
                 <td className={cell} />
               </tr>
             );
-          })}
+          }),
+          ])}
         </tbody>
         {rows.length > 0 && (
           <tfoot className="[display:table-row-group]">

@@ -2,7 +2,7 @@
 
 import { AlertTriangle, Pencil, Plus, Trash2 } from "lucide-react";
 import { useMemo, useState, type FormEvent, type KeyboardEvent } from "react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { PaymentFormDialog } from "@/components/payments/payment-form-dialog";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";

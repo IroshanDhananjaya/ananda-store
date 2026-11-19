@@ -3,7 +3,7 @@
 import { ClipboardCheck, Clock, Pencil, Plus, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useState, type FormEvent, type KeyboardEvent } from "react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { LineStatusBadge } from "@/components/ui/badge";
 import { Button, buttonClass } from "@/components/ui/button";
 import { Field, Input, ReadOnlyValue, toNumber } from "@/components/ui/form";

@@ -2,7 +2,7 @@
 
 import { AlertTriangle, Plus, Wand2, X } from "lucide-react";
 import { useState, type FormEvent } from "react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { Button } from "@/components/ui/button";
 import { ChequeStatusField } from "@/components/payments/cheque-status-field";
 import { Field, Input, ReadOnlyValue, Textarea, toNumber } from "@/components/ui/form";
@@ -418,7 +418,7 @@ function DeliverForm({ sale, onDone }: { sale: Sale; onDone: () => void }) {
           <div className="overflow-hidden rounded-lg border border-slate-200">
             <StackBox>
               <table className="w-full text-sm">
-                <thead className="bg-slate-50 text-left text-xs font-semibold tracking-wide text-slate-500 uppercase">
+                <thead className="bg-slate-50 text-left text-xs font-medium text-slate-500">
                   <tr>
                     <th className="px-3 py-2">Bill</th>
                     <th className="px-3 py-2 text-right">To pay</th>

@@ -3,7 +3,7 @@
 import { FileText, MapPin, PackagePlus, Plus, Trash2, X } from "lucide-react";
 import Link from "next/link";
 import { useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { ItemFormDialog } from "@/components/items/item-form-dialog";
 import { Button, buttonClass } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -392,7 +392,7 @@ export function ReceiveLoadForm({ onSaved, cancelHref }: { onSaved: (id: string)
                 <div className="relative overflow-x-auto">
                   <StackBox>
                     <table className="w-full min-w-[700px] text-sm">
-                      <thead className="border-b border-slate-200 text-left text-xs font-semibold tracking-wide text-slate-500 uppercase">
+                      <thead className="border-b border-slate-200 text-left text-xs font-medium text-slate-500">
                         <tr>
                           <th className="w-12 py-2.5 pl-5">#</th>
                           <th className="px-2 py-2.5">Item</th>
@@ -584,7 +584,7 @@ export function ReceiveLoadForm({ onSaved, cancelHref }: { onSaved: (id: string)
           <button
             type="button"
             onClick={addInvoice}
-            className="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed border-slate-300 bg-white/60 py-4 text-sm font-medium text-slate-600 transition-colors hover:border-brand-300 hover:bg-brand-50/50 hover:text-brand-700"
+            className="flex w-full items-center justify-center gap-2 rounded-lg border-2 border-dashed border-slate-300 bg-white/60 py-4 text-sm font-medium text-slate-600 transition-colors hover:border-brand-300 hover:bg-brand-50/50 hover:text-brand-700"
           >
             <FileText className="size-4" /> Add another invoice (same load)
           </button>
@@ -592,10 +592,10 @@ export function ReceiveLoadForm({ onSaved, cancelHref }: { onSaved: (id: string)
 
         <aside className="flex flex-col gap-6 min-[1360px]:sticky min-[1360px]:top-6 min-[1360px]:max-h-[calc(100dvh-3rem)] min-[1360px]:overflow-y-auto">
           <Card>
-            <div className="bg-gradient-to-br from-brand-700 to-brand-900 px-5 py-5 text-white">
-              <p className="text-xs font-medium tracking-wide text-brand-100 uppercase">Grand total</p>
-              <p className="mt-1 text-3xl font-semibold tracking-tight tabular-nums">{formatMoney(grandTotal)}</p>
-              <p className="mt-1 text-xs text-brand-100">
+            <div className="border-b border-slate-200 px-5 py-4">
+              <p className="text-xs font-medium text-slate-500">Grand total</p>
+              <p className="mt-1 text-2xl font-semibold tracking-tight text-slate-900 tabular-nums">{formatMoney(grandTotal)}</p>
+              <p className="mt-1 text-xs text-slate-500">
                 {several ? `${invoices.length} invoices · ` : ""}
                 {filled.length} item{filled.length === 1 ? "" : "s"} · {formatQty(totalQty)} units · saved as the bill amount
               </p>

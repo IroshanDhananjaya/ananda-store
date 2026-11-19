@@ -147,22 +147,60 @@ export const RAIGAM_CHEQUE_DAYS = 21;
 export const CHEQUE_REMIND_DAYS = 5;
 
 /**
- * The day Raigam deposits our cheque for a received order: the date on the cheque, or 21 days
- * after the goods came while no cheque is entered. "" = not received yet, or paid another way.
+ * The day Raigam deposits our cheque for a received order (or invoice): the date on the cheque, or 21
+ * days after the goods came while no cheque is entered. "" = not received yet, or paid another way.
  */
 export function raigamChequeDate(order: Pick<Order, "receivedDate" | "paymentMethod" | "chequeDepositDate">) {
   if (!order.receivedDate || (order.paymentMethod && order.paymentMethod !== "Cheque")) return "";
   return order.chequeDepositDate || addDays(order.receivedDate, RAIGAM_CHEQUE_DAYS);
 }
 
+/** Something Raigam is paid for, with its payment: an order's whole bill, or one invoice of it */
+export type PayTarget = Pick<Order, "receivedDate" | "totalBillAmount"> & OrderPayment;
+
 /**
- * Received orders to remind about: the cheque deposits within the next 5 days (or today), or
- * the date has passed and no payment is entered yet. Soonest first.
+ * One payment to Raigam to keep track of: the order's (one payment for the whole bill), or, when the
+ * order's invoices are paid one by one, one invoice's. `totalBillAmount` is what that payment covers.
  */
-export function chequeReminders(orders: Order[]) {
-  return orders
-    .map((order) => ({ order, date: raigamChequeDate(order) }))
-    .filter(({ order, date }) => date && (daysUntil(date) < 0 ? !order.paymentMethod : daysUntil(date) <= CHEQUE_REMIND_DAYS))
+export type RaigamPayment = PayTarget & {
+  order: Order;
+  /** Set when this is one invoice of an order paid invoice by invoice */
+  invoice?: OrderInvoice;
+  /** "ORD - 0007", or "ORD - 0007 · inv. 132364" */
+  label: string;
+};
+
+/** The order's invoices are paid one by one (each its own cheque), not with one payment for the bill */
+export function paidByInvoice(order: Pick<Order, "orderId" | "paymentMethod">, invoices: OrderInvoice[]) {
+  return !order.paymentMethod && invoices.some((i) => i.orderId === order.orderId && !!i.paymentMethod);
+}
+
+/** Every payment to Raigam to track for these orders: one per order, or one per invoice when paid by invoice */
+export function raigamPayments(orders: Order[], invoices: OrderInvoice[], orderItems: OrderItem[]): RaigamPayment[] {
+  return orders.flatMap((order): RaigamPayment[] => {
+    if (!paidByInvoice(order, invoices)) return [{ ...paymentOf(order), receivedDate: order.receivedDate, totalBillAmount: order.totalBillAmount, order, label: order.orderId }];
+    const lines = orderItems.filter((l) => l.orderId === order.orderId);
+    return invoices
+      .filter((i) => i.orderId === order.orderId)
+      .map((invoice, n) => ({
+        ...paymentOf(invoice),
+        receivedDate: order.receivedDate,
+        totalBillAmount: invoiceTotals(invoice, lines).total,
+        order,
+        invoice,
+        label: `${order.orderId} · ${invoice.invoiceNumber ? `inv. ${invoice.invoiceNumber}` : `invoice ${n + 1}`}`,
+      }));
+  });
+}
+
+/**
+ * Payments to remind about: the cheque deposits within the next 5 days (or today), or the date has
+ * passed and no payment is entered yet. Soonest first.
+ */
+export function chequeReminders<T extends PayTarget>(payments: T[]) {
+  return payments
+    .map((payment) => ({ payment, date: raigamChequeDate(payment) }))
+    .filter(({ payment, date }) => date && (daysUntil(date) < 0 ? !payment.paymentMethod : daysUntil(date) <= CHEQUE_REMIND_DAYS))
     .map((r) => ({ ...r, days: daysUntil(r.date) }))
     .sort((a, b) => a.date.localeCompare(b.date));
 }

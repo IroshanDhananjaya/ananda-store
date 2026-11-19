@@ -90,6 +90,15 @@ export type OrderInvoice = {
   invoiceDate: string;
   /** "Discount % for Total Invoice", taken off this invoice's lines total (0 = none) */
   discountPercent: number;
+  /**
+   * This invoice paid on its own (its own cheque, cash or transfer), when the order's invoices are
+   * paid one by one. Not paid ("") while the order's single payment covers the whole bill.
+   */
+  paymentMethod: PaymentMethod | "";
+  paidDate: string;
+  chequeNumber: string;
+  chequeDepositDate: string;
+  paymentReference: string;
 };
 
 /** "Order Item Details" sheet — one line per item in an order */
@@ -395,7 +404,7 @@ export type OrderInput = Omit<Order, "id" | "orderId" | "postedToStock" | "total
 /** One payment per Raigam bill */
 export type OrderPayment = Pick<Order, "paymentMethod" | "paidDate" | "chequeNumber" | "chequeDepositDate" | "paymentReference">;
 /** A Raigam invoice on an order: not known when the order is made, entered once it comes */
-export type OrderInvoiceInput = Omit<OrderInvoice, "id" | "orderId">;
+export type OrderInvoiceInput = Omit<OrderInvoice, "id" | "orderId" | keyof OrderPayment>;
 /** `invoiceId` / `invoicedQty` left out = the line keeps what it had (matched by item code) */
 export type OrderLineInput = Pick<OrderItem, "itemCode" | "orderedQty" | "receivedQty" | "unitPrice" | "discount" | "remarks"> &
   Partial<Pick<OrderItem, "invoiceId" | "invoicedQty">>;

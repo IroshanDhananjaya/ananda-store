@@ -38,18 +38,18 @@ export function StickyHeader({ title, description, actions }: { title: ReactNode
         className={cn(
           "sticky top-[57px] z-20 -mx-4 border-b px-4 py-2.5 transition-[background-color,border-color,box-shadow] sm:-mx-5 sm:px-5 lg:top-0 lg:-mx-6 lg:px-6",
           "print:static print:mx-0 print:border-0 print:bg-transparent print:px-0 print:shadow-none",
-          stuck ? "border-slate-200 bg-white shadow-[0_6px_16px_-10px_rgb(15_23_42/0.25)]" : "border-transparent",
+          stuck ? "border-slate-200 bg-white/95" : "border-transparent",
         )}
       >
         {/* The buttons share the title's row when they fit (and fill their own row on a phone when they don't) */}
         <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
-          <h1 className="min-w-0 text-xl font-semibold tracking-tight text-slate-900 sm:text-2xl">{title}</h1>
+          <h1 className="min-w-0 text-lg font-semibold tracking-tight text-slate-900">{title}</h1>
           {actions && <div className="flex grow flex-wrap items-center justify-end gap-2 print:hidden">{actions}</div>}
         </div>
       </div>
       {/* Under the bar, so it scrolls away and the stuck bar stays one or two rows */}
       {description ? (
-        <p className="mb-4 text-sm text-slate-500 lg:truncate" title={typeof description === "string" ? description : undefined}>
+        <p className="mb-4 text-[13px] text-slate-500 lg:truncate" title={typeof description === "string" ? description : undefined}>
           {description}
         </p>
       ) : (

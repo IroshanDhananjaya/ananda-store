@@ -3,7 +3,7 @@
 import { BadgeCheck, ChevronDown, ChevronRight, Eye, Plus, Printer, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { Fragment, useMemo, useState, type ReactNode } from "react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { Badge, BillStatusBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -504,7 +504,7 @@ function ItemBills({
 }) {
   return (
     <table className="w-full text-xs">
-      <thead className="text-left text-[11px] font-semibold tracking-wide text-slate-500 uppercase">
+      <thead className="text-left text-xs font-medium text-slate-500">
         <tr className="border-b border-slate-200">
           <th className="py-2 pr-3 font-semibold">Date</th>
           <th className="py-2 pr-3 font-semibold">Bill No.</th>

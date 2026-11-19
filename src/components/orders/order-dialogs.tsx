@@ -2,7 +2,7 @@
 
 import { ClipboardCheck, Plus, X } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { LineStatusBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select, toNumber } from "@/components/ui/form";
@@ -246,7 +246,8 @@ type ReceiveRow = {
   invoicedQty: string;
   receivedQty: string;
   unitPrice: string;
-  discount: number;
+  /** Rs. off the whole line, as on the invoice */
+  discount: string;
   remarks: string;
   /** Already in stock: it can't change */
   inStock: boolean;
@@ -312,7 +313,7 @@ function ReceiveForm({ order, lines, onDone }: { order: Order; lines: OrderItem[
         invoicedQty: String(invoiceKey ? (firstTime ? l.orderedQty : l.invoicedQty) : 0),
         receivedQty: String(firstTime ? l.orderedQty : l.receivedQty),
         unitPrice: price === undefined ? "" : String(price),
-        discount: l.discount,
+        discount: l.discount ? String(l.discount) : "",
         remarks: l.remarks,
         inStock: !!l.postedLocation,
       };
@@ -328,7 +329,7 @@ function ReceiveForm({ order, lines, onDone }: { order: Order; lines: OrderItem[
   const [error, setError] = useState<string>();
   const { checked, setTicked } = useCheckedRows(order.id);
 
-  const valueOf = (r: ReceiveRow) => (r.invoiceKey ? round2(toNumber(r.invoicedQty) * toNumber(r.unitPrice) - r.discount) : 0);
+  const valueOf = (r: ReceiveRow) => (r.invoiceKey ? round2(toNumber(r.invoicedQty) * toNumber(r.unitPrice) - toNumber(r.discount)) : 0);
   const rowsOn = (key: string) => rows.filter((r) => r.invoiceKey === key);
   const sumOf = (key: string) => round2(rowsOn(key).reduce((sum, r) => sum + valueOf(r), 0));
   const billTotal = round2(invoices.reduce((sum, i) => sum + invoiceDiscount(sumOf(i.key), toNumber(i.discountPercent)).total, 0));
@@ -374,6 +375,9 @@ function ReceiveForm({ order, lines, onDone }: { order: Order; lines: OrderItem[
 
   // Its items become Missing until they're put on another invoice
   function removeInvoice(key: string) {
+    const on = rows.filter((r) => r.invoiceKey === key).length;
+    const name = invoiceName(invoices.find((i) => i.key === key) ?? { invoiceNumber: "" }, invoices.findIndex((i) => i.key === key));
+    if (on && !window.confirm(`Remove ${name}? Its ${on} item${on === 1 ? "" : "s"} will be marked Missing.`)) return;
     setInvoices((is) => is.filter((i) => i.key !== key));
     setRows((rs) => rs.map((r) => (r.invoiceKey === key ? { ...r, invoiceKey: "", invoicedQty: "0", receivedQty: "0" } : r)));
     if (show === `inv:${key}`) setShow("all");
@@ -387,7 +391,7 @@ function ReceiveForm({ order, lines, onDone }: { order: Order; lines: OrderItem[
     const price = lastPrice.get(itemCode);
     setRows((rs) => [
       ...rs,
-      { key, id: "", itemCode, orderedQty: 0, invoiceKey, invoicedQty: "", receivedQty: "", unitPrice: price === undefined ? "" : String(price), discount: 0, remarks: "", inStock: false },
+      { key, id: "", itemCode, orderedQty: 0, invoiceKey, invoicedQty: "", receivedQty: "", unitPrice: price === undefined ? "" : String(price), discount: "", remarks: "", inStock: false },
     ]);
     setQuery("");
     focusField(`rcvQty-${key}`);
@@ -403,6 +407,8 @@ function ReceiveForm({ order, lines, onDone }: { order: Order; lines: OrderItem[
       if (r.invoiceKey && (!isWhole(r.invoicedQty) || toNumber(r.invoicedQty) === 0)) return setError(`Enter the qty on the invoice for ${name}, or mark it Missing.`);
       if (!isWhole(r.receivedQty)) return setError(`What came of ${name} must be a whole number (0 or more).`);
       if (r.invoiceKey && !isPrice(r.unitPrice)) return setError(`Enter the price of ${name} as on its invoice.`);
+      if (r.invoiceKey && r.discount && (!isPrice(r.discount) || toNumber(r.discount) > toNumber(r.invoicedQty) * toNumber(r.unitPrice)))
+        return setError(`The discount on ${name} must be a Rs. amount no more than its qty × price.`);
       if (!r.orderedQty && !r.invoiceKey && toNumber(r.receivedQty) === 0) return setError(`${name} wasn't ordered: put it on an invoice, or take it off.`);
     }
 
@@ -417,7 +423,7 @@ function ReceiveForm({ order, lines, onDone }: { order: Order; lines: OrderItem[
         invoicedQty: r.invoiceKey ? toNumber(r.invoicedQty) : 0,
         receivedQty: toNumber(r.receivedQty),
         unitPrice: toNumber(r.unitPrice),
-        discount: r.discount,
+        discount: toNumber(r.discount),
         remarks: r.remarks,
       })),
     };
@@ -526,8 +532,8 @@ function ReceiveForm({ order, lines, onDone }: { order: Order; lines: OrderItem[
 
         <div className="overflow-x-auto rounded-lg border border-slate-200">
           <StackBox>
-            <table className="w-full min-w-[1100px] text-sm">
-              <thead className="bg-slate-50 text-left text-xs font-semibold tracking-wide text-slate-500 uppercase">
+            <table className="w-full min-w-[1200px] text-sm">
+              <thead className="bg-slate-50 text-left text-xs font-medium text-slate-500">
                 <tr>
                   <th className="w-10 py-2 pr-1 pl-3">
                     <input
@@ -545,6 +551,9 @@ function ReceiveForm({ order, lines, onDone }: { order: Order; lines: OrderItem[
                   <th className="w-32 px-3 py-2 text-right whitespace-nowrap">On invoice</th>
                   <th className="w-32 px-3 py-2 text-right">Received</th>
                   <th className="w-36 px-3 py-2 text-right whitespace-nowrap">Price (Rs.)</th>
+                  <th className="w-28 px-3 py-2 text-right whitespace-nowrap" title="Rs. off the whole line, as printed on the invoice">
+                    Discount
+                  </th>
                   <th className="px-3 py-2 text-right">Value</th>
                   <th className="px-3 py-2">Status</th>
                   <th className="px-3 py-2">Remarks</th>
@@ -556,7 +565,7 @@ function ReceiveForm({ order, lines, onDone }: { order: Order; lines: OrderItem[
               <tbody className="divide-y divide-slate-100">
                 {visible.length === 0 && (
                   <tr>
-                    <td colSpan={11} className="px-3 py-6 text-center text-slate-500">
+                    <td colSpan={12} className="px-3 py-6 text-center text-slate-500">
                       No items here.
                     </td>
                   </tr>
@@ -642,9 +651,22 @@ function ReceiveForm({ order, lines, onDone }: { order: Order; lines: OrderItem[
                           aria-label={`Price of ${r.itemCode} on the invoice`}
                         />
                       </td>
+                      <td className="px-3 py-2">
+                        <Input
+                          type="number"
+                          min={0}
+                          step="0.01"
+                          inputMode="decimal"
+                          value={r.discount}
+                          placeholder="0"
+                          onChange={(e) => update(r.key, { discount: e.target.value })}
+                          disabled={!r.invoiceKey || r.inStock}
+                          className="h-9 min-w-20 text-right tabular-nums"
+                          aria-label={`Line discount of ${r.itemCode} on the invoice (Rs.)`}
+                        />
+                      </td>
                       <td className="px-3 py-2 text-right font-medium whitespace-nowrap text-slate-900 tabular-nums">
                         {r.invoiceKey ? formatMoney(valueOf(r)) : "—"}
-                        {r.discount > 0 && r.invoiceKey && <span className="block text-xs font-normal text-slate-500">less {formatMoney(r.discount)}</span>}
                       </td>
                       <td className="px-3 py-2">
                         <LineStatusBadge status={status} />
@@ -847,7 +869,7 @@ function PostForm({ order, lines, only, onDone }: { order: Order; lines: OrderIt
           <div className="overflow-x-auto rounded-lg border border-slate-200">
             <StackBox>
               <table className="w-full min-w-[860px] text-sm">
-                <thead className="bg-slate-50 text-left text-xs font-semibold tracking-wide text-slate-500 uppercase">
+                <thead className="bg-slate-50 text-left text-xs font-medium text-slate-500">
                   <tr>
                     <th className="w-10 px-3 py-2">
                       <input
@@ -954,7 +976,7 @@ function PostForm({ order, lines, only, onDone }: { order: Order; lines: OrderIt
         {postable.length > 0 && (
           <div className="w-full overflow-x-auto rounded-lg border border-slate-200 lg:w-auto">
             <table className="w-full text-sm">
-              <thead className="bg-slate-50 text-left text-xs font-semibold tracking-wide text-slate-500 uppercase">
+              <thead className="bg-slate-50 text-left text-xs font-medium text-slate-500">
                 <tr>
                   <th className="px-3 py-2">Invoice</th>
                   <th className="px-3 py-2 text-right">Items total</th>

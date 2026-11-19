@@ -87,7 +87,7 @@ function SortTH({
       <button
         type="button"
         onClick={() => onSort(k)}
-        className={cn("inline-flex items-center gap-1 tracking-wide uppercase hover:text-brand-100 print:pointer-events-none", right && "flex-row-reverse")}
+        className={cn("inline-flex items-center gap-1 hover:text-slate-900 print:pointer-events-none", right && "flex-row-reverse")}
       >
         {children}
         <Icon className={cn("size-3.5 print:hidden", active ? "opacity-100" : "opacity-60")} aria-hidden />

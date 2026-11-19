@@ -1,5 +1,5 @@
 import { linkAllPayments } from "./ledger";
-import { addDays } from "./utils";
+import { addDays, NOT_PAID } from "./utils";
 import type { Expense, Item, Order, OrderInvoice, OrderItem, Payment, Route, Sale, SaleStatus, Shop, StockRecord, StoreLocation } from "./types";
 
 // Dummy data used on first load and by "Reset demo data".
@@ -86,6 +86,7 @@ export const seedOrderInvoices: OrderInvoice[] = Object.entries(invoiceOf).map((
   ...invoice,
   company: "Raigam Marketing Services (Pvt) Ltd",
   discountPercent: 0,
+  ...NOT_PAID,
 }));
 
 // Invoice price = the item's cost price, no discounts; what was received is what the invoice charges

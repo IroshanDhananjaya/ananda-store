@@ -79,7 +79,13 @@ export async function loadData(tx: Tx): Promise<Data> {
       chequeDepositDate: unblank(r.chequeDepositDate),
       requiredDate: unblank(r.requiredDate),
     })),
-    orderInvoices: orderInvoices.map((r) => ({ ...r, invoiceDate: unblank(r.invoiceDate) })),
+    orderInvoices: orderInvoices.map((r) => ({
+      ...r,
+      invoiceDate: unblank(r.invoiceDate),
+      paymentMethod: r.paymentMethod as Order["paymentMethod"],
+      paidDate: unblank(r.paidDate),
+      chequeDepositDate: unblank(r.chequeDepositDate),
+    })),
     orderItems: orderItems.map(({ postedLocation, invoiceId, ...r }): OrderItem => {
       const line = { ...r, invoiceId: unblank(invoiceId) };
       return postedLocation ? { ...line, postedLocation } : line;
@@ -178,7 +184,12 @@ const SPECS: TableSpec[] = [
     chequeDepositDate: blank(r.chequeDepositDate),
     requiredDate: blank(r.requiredDate),
   })),
-  spec("orderInvoices", t.orderInvoices, (r) => ({ ...r, invoiceDate: blank(r.invoiceDate) })),
+  spec("orderInvoices", t.orderInvoices, (r) => ({
+    ...r,
+    invoiceDate: blank(r.invoiceDate),
+    paidDate: blank(r.paidDate),
+    chequeDepositDate: blank(r.chequeDepositDate),
+  })),
   spec("orderItems", t.orderItems, (r) => ({ ...r, invoiceId: blank(r.invoiceId), postedLocation: blank(r.postedLocation) })),
   spec("routes", t.routes, (r) => ({ ...r })),
   spec("shops", t.shops, (r) => ({ ...r })),

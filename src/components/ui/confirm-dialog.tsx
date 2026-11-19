@@ -40,10 +40,11 @@ export function ConfirmDialog({
       size="sm"
       footer={
         <>
-          <Button variant="outline" onClick={onClose}>
+          {/* Enter on a delete question means Cancel, so a habit Enter can't delete */}
+          <Button variant="outline" onClick={onClose} autoFocus={tone === "danger"}>
             Cancel
           </Button>
-          <Button variant={tone} onClick={confirm} disabled={busy} autoFocus>
+          <Button variant={tone} onClick={confirm} disabled={busy} autoFocus={tone !== "danger"}>
             {busy ? "Saving…" : confirmLabel}
           </Button>
         </>

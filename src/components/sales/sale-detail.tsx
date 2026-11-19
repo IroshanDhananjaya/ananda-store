@@ -4,7 +4,7 @@ import { Ban, CalendarClock, ChevronDown, Clock, Ellipsis, Gift, HandCoins, Pack
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Fragment, type ReactNode } from "react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { ChequeStatusBadge } from "@/components/payments/cheque-status-field";
 import { PaymentFormDialog } from "@/components/payments/payment-form-dialog";
 import { BillStatusBadge, DueDateLabel } from "@/components/ui/badge";
@@ -95,7 +95,7 @@ function EditItemCell({ onClick, name }: { onClick: () => void; name: string }) 
 function SmallDetail({ label, children, className }: { label: string; children: ReactNode; className?: string }) {
   return (
     <div className={cn("min-w-0", className)}>
-      <dt className="text-[11px] font-medium tracking-wide text-slate-500 uppercase">{label}</dt>
+      <dt className="text-xs font-medium text-slate-500">{label}</dt>
       <dd className="mt-0.5 text-xs font-medium text-slate-800">{children}</dd>
     </div>
   );
@@ -109,7 +109,7 @@ function NextStep({ icon, title, text, tone }: { icon: ReactNode; title: string;
     red: "border-red-200 bg-red-50 text-red-900",
   };
   return (
-    <div className={cn("mb-6 flex items-center gap-3 rounded-xl border px-5 py-4 print:hidden", tones[tone])}>
+    <div className={cn("mb-6 flex items-center gap-3 rounded-lg border px-5 py-4 print:hidden", tones[tone])}>
       <span className="grid size-10 shrink-0 place-items-center rounded-full bg-white shadow-sm [&_svg]:size-5">{icon}</span>
       <div className="flex-1">
         <p className="text-sm font-semibold">{title}</p>
@@ -392,7 +392,7 @@ function BillDetail({ sale }: { sale: Sale }) {
         {/* Large: who the bill is for, Raigam's invoice number and what it comes to */}
         <dl className="grid grid-cols-2 gap-x-6 gap-y-4 px-5 py-4 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_auto]">
           <div className="col-span-2 min-w-0 lg:col-span-1">
-            <dt className="text-[11px] font-medium tracking-wide text-slate-500 uppercase">Dealer (Store)</dt>
+            <dt className="text-xs font-medium text-slate-500">Dealer (Store)</dt>
             <dd className="mt-0.5 text-lg leading-snug font-semibold">
               {shop ? (
                 <Link href={`/stores/${shop.id}`} className="text-brand-700 hover:underline print:text-slate-900 print:no-underline">
@@ -405,7 +405,7 @@ function BillDetail({ sale }: { sale: Sale }) {
             {shop && <dd className="text-xs text-slate-500">{[shop.shopCode, shop.ownerName, shop.phone].filter(Boolean).join(" · ")}</dd>}
           </div>
           <div className="min-w-0">
-            <dt className="text-[11px] font-medium tracking-wide text-slate-500 uppercase">Raigam Invoice No.</dt>
+            <dt className="text-xs font-medium text-slate-500">Raigam Invoice No.</dt>
             <dd className="mt-0.5 flex flex-wrap items-center gap-2 text-lg leading-snug font-semibold text-slate-900 tabular-nums">
               {sale.invoiceNo || <span className="text-base font-medium text-slate-400">Not entered</span>}
               {sale.invoiceNo && <CheckedToggle sale={sale} />}
@@ -413,7 +413,7 @@ function BillDetail({ sale }: { sale: Sale }) {
             <dd className="text-xs text-slate-500">Bill No. {sale.saleNo}</dd>
           </div>
           <div className="text-right">
-            <dt className="text-[11px] font-medium tracking-wide text-slate-500 uppercase">Invoice Value</dt>
+            <dt className="text-xs font-medium text-slate-500">Invoice Value</dt>
             <dd className="mt-0.5 text-xl leading-snug font-bold text-slate-900 tabular-nums">{formatMoney(d.total)}</dd>
             <dd className={cn("text-xs font-medium tabular-nums", d.due > 0 ? "text-red-600" : d.delivered ? "text-emerald-700" : "text-slate-500")}>
               {d.delivered ? `Cash balance ${formatMoney(d.due)}` : "Cash balance after delivery"}
