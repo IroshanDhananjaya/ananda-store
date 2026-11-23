@@ -11,7 +11,7 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Select } from "@/components/ui/form";
 import { Card, FilterTabs, PageHeader, SearchInput, TableFooter, Toolbar } from "@/components/ui/layout";
 import { Pagination, usePagination } from "@/components/ui/pagination";
-import { EmptyRow, RowActions, Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
+import { EmptyRow, RowActions, Table, TBody, TD, TH, THead, TR, useRowSort } from "@/components/ui/table";
 import { useAppStore, useRouteMap, useShopBalances } from "@/lib/store";
 import { formatPct, returnRate, returnSplit, type ReturnRate } from "@/lib/returns";
 import type { Shop } from "@/lib/types";
@@ -56,7 +56,22 @@ export function ShopsPage() {
     .sort((a, b) => a.shopCode.localeCompare(b.shopCode));
   const total = rows.reduce((sum, s) => sum + balanceOf(s), 0);
 
-  const pager = usePagination(rows, [query, routeId, filter]);
+  // A column header sorts every store (not just this page)
+  const sorter = useRowSort(rows, {
+    code: (s) => s.shopCode,
+    name: (s) => s.shopName,
+    phone: (s) => s.phone,
+    location: (s) => s.town,
+    route: (s) => routeMap.get(s.routeId)?.routeCode,
+    limit: (s) => s.creditLimit,
+    balance: (s) => balanceOf(s),
+    returns: (s) => {
+      const r = rates.get(s.id);
+      return r && r.sold > 0 ? r.pct : null;
+    },
+    status: (s) => (s.active ? "Active" : "Inactive"),
+  });
+  const pager = usePagination(sorter.rows, [query, routeId, filter, sorter.key]);
 
   return (
     <>
@@ -97,17 +112,21 @@ export function ShopsPage() {
         <Table>
           <THead>
             <tr>
-              <TH>Store No.</TH>
-              <TH>Store Name</TH>
-              <TH>Phone</TH>
-              <TH>Location</TH>
-              <TH>Route</TH>
-              <TH className="text-right">Credit Limit</TH>
-              <TH className="text-right">Cash Balance</TH>
-              <TH className="text-right" title="Value of returns ÷ value of items sold to the store">
+              <TH sort={sorter.column("code")}>Store No.</TH>
+              <TH sort={sorter.column("name")}>Store Name</TH>
+              <TH sort={sorter.column("phone")}>Phone</TH>
+              <TH sort={sorter.column("location")}>Location</TH>
+              <TH sort={sorter.column("route")}>Route</TH>
+              <TH className="text-right" sort={sorter.column("limit")}>
+                Credit Limit
+              </TH>
+              <TH className="text-right" sort={sorter.column("balance")}>
+                Cash Balance
+              </TH>
+              <TH className="text-right" title="Value of returns ÷ value of items sold to the store" sort={sorter.column("returns")}>
                 Return %
               </TH>
-              <TH>Status</TH>
+              <TH sort={sorter.column("status")}>Status</TH>
               <TH className="w-28">
                 <span className="sr-only">Actions</span>
               </TH>

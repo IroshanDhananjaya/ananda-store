@@ -5,14 +5,14 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { toast } from "@/lib/toast";
-import { OrderStatusBadge } from "@/components/ui/badge";
+import { orderLabel, OrderStatusBadge } from "@/components/ui/badge";
 import { Button, buttonClass } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { DateRangePicker, inDateRange, type DateRange } from "@/components/ui/date-range-picker";
 import { Select } from "@/components/ui/form";
 import { Card, ClearFilters, FilterTabs, PageHeader, SearchInput, TableFooter, Toolbar } from "@/components/ui/layout";
 import { Pagination, usePagination } from "@/components/ui/pagination";
-import { EmptyRow, RowActions, Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
+import { EmptyRow, RowActions, Table, TBody, TD, TH, THead, TR, useRowSort } from "@/components/ui/table";
 import { useAppStore } from "@/lib/store";
 import type { Order, OrderStatus } from "@/lib/types";
 import { useDialog } from "@/lib/use-dialog";
@@ -77,7 +77,27 @@ export function OrdersPage() {
   const billTotal = rows.reduce((sum, o) => sum + o.totalBillAmount, 0);
   const notPaid = rows.reduce((sum, o) => sum + paymentsOf(o).reduce((s, p) => s + (p.paymentMethod ? 0 : p.totalBillAmount), 0), 0);
 
-  const pager = usePagination(rows, [query, status, range, dateBy]);
+  // A column header sorts every order (not just this page)
+  const sorter = useRowSort(rows, {
+    order: (o) => o.orderId,
+    invoice: (o) => invoiceNumbersOf(o, orderInvoices),
+    date: (o) => o.orderDate,
+    received: (o) => o.receivedDate,
+    // What the Payment cell says first
+    payment: (o) => {
+      if (paidByInvoice(o, orderInvoices)) {
+        const ps = paymentsOf(o);
+        return `${ps.filter((p) => p.paymentMethod).length} of ${ps.length} invoices paid`;
+      }
+      if (!o.paymentMethod) return "Not paid";
+      return o.paymentMethod === "Cheque" ? `Cheque ${o.chequeNumber}` : o.paymentMethod;
+    },
+    deposit: (o) => raigamChequeDate(nextCheque(o) ?? o),
+    qty: (o) => qtyByOrder.get(o.orderId) ?? 0,
+    bill: (o) => o.totalBillAmount,
+    status: (o) => orderLabel[statusOf(o)],
+  });
+  const pager = usePagination(sorter.rows, [query, status, range, dateBy, sorter.key]);
 
   return (
     <>
@@ -128,15 +148,30 @@ export function OrdersPage() {
         <Table>
           <THead>
             <tr>
-              <TH>Order ID</TH>
-              <TH title="Invoice Number / PO Number">Invoice / PO No.</TH>
-              <TH>Order Date</TH>
-              <TH title="Order Received Date / Time">Received</TH>
-              <TH title="How the bill was paid">Payment</TH>
-              <TH title={`The day Raigam deposits the cheque: ${RAIGAM_CHEQUE_DAYS} days after the goods came, or the date on the cheque`}>Cheque Deposit</TH>
-              <TH className="text-right" title="Total Item Quantity">Total Qty</TH>
-              <TH className="text-right" title="Total Bill Amount">Bill Amount</TH>
-              <TH>Status</TH>
+              <TH sort={sorter.column("order")}>Order ID</TH>
+              <TH title="Invoice Number / PO Number" sort={sorter.column("invoice")}>
+                Invoice / PO No.
+              </TH>
+              <TH sort={sorter.column("date")}>Order Date</TH>
+              <TH title="Order Received Date / Time" sort={sorter.column("received")}>
+                Received
+              </TH>
+              <TH title="How the bill was paid" sort={sorter.column("payment")}>
+                Payment
+              </TH>
+              <TH
+                title={`The day Raigam deposits the cheque: ${RAIGAM_CHEQUE_DAYS} days after the goods came, or the date on the cheque`}
+                sort={sorter.column("deposit")}
+              >
+                Cheque Deposit
+              </TH>
+              <TH className="text-right" title="Total Item Quantity" sort={sorter.column("qty")}>
+                Total Qty
+              </TH>
+              <TH className="text-right" title="Total Bill Amount" sort={sorter.column("bill")}>
+                Bill Amount
+              </TH>
+              <TH sort={sorter.column("status")}>Status</TH>
               <TH className="w-28">
                 <span className="sr-only">Actions</span>
               </TH>

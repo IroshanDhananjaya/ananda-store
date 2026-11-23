@@ -12,7 +12,7 @@ import { DateRangePicker, inDateRange, type DateRange } from "@/components/ui/da
 import { Select } from "@/components/ui/form";
 import { Card, ClearFilters, FilterTabs, PageHeader, SearchInput, SummaryTile, TableFooter, Toolbar } from "@/components/ui/layout";
 import { Pagination, usePagination } from "@/components/ui/pagination";
-import { EmptyRow, RowActions, Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
+import { EmptyRow, RowActions, SortScope, SortTbody, SortTh, Table, TBody, TD, TH, THead, TR, useRowSort } from "@/components/ui/table";
 import {
   avgPrice,
   formatPct,
@@ -160,14 +160,35 @@ export function ReturnsPage() {
     .filter((x) => ofKind(x.ret.kind) && inDateRange(x.date, range))
     .filter((x) => !storeId || x.sale.shopId === storeId)
     .filter((x) => includesText([...itemText(x.ret.sapCode), ...billText(x.sale)], query));
-  const billPager = usePagination(billRows, [query, kind, range, storeId]);
+  // A column header sorts every line (not just this page)
+  const billSorter = useRowSort(billRows, {
+    date: (x) => x.date,
+    bill: (x) => x.sale.saleNo,
+    store: (x) => shopMap.get(x.sale.shopId)?.shopName,
+    item: (x) => itemMap.get(x.ret.sapCode)?.description ?? "Unknown item",
+    type: (x) => x.ret.kind,
+    qty: (x) => x.ret.qty,
+    price: (x) => x.ret.unitPrice,
+    credit: (x) => round2(x.ret.qty * x.ret.unitPrice),
+    status: (x) => returnStatusLabel(x.ret.qty, x.collected, allocations.byReturn.get(x.ret.id)),
+  });
+  const billPager = usePagination(billSorter.rows, [query, kind, range, storeId, billSorter.key]);
 
   // Sent to Raigam: return notes, newest first
   const sentRows = raigamReturns
     .filter((n) => inDateRange(n.date, range))
     .filter((n) => includesText([n.returnNo, n.reference, n.notes, ...n.lines.flatMap((l) => itemText(l.sapCode))], query))
     .sort((a, b) => b.date.localeCompare(a.date) || b.returnNo.localeCompare(a.returnNo));
-  const sentPager = usePagination(sentRows, [query, range]);
+  const sentSorter = useRowSort(sentRows, {
+    returnNo: (n) => n.returnNo,
+    date: (n) => n.date,
+    reference: (n) => n.reference,
+    good: (n) => unitsOn(n, "Good") || null,
+    market: (n) => unitsOn(n, "Market") || null,
+    value: (n) => noteValue(n),
+    note: (n) => n.notes,
+  });
+  const sentPager = usePagination(sentSorter.rows, [query, range, sentSorter.key]);
 
   return (
     <>
@@ -416,15 +437,21 @@ export function ReturnsPage() {
             <Table>
               <THead>
                 <tr>
-                  <TH>Date</TH>
-                  <TH>Bill No.</TH>
-                  <TH>Store</TH>
-                  <TH>Item</TH>
-                  <TH>Type</TH>
-                  <TH className="text-right">Qty</TH>
-                  <TH className="text-right">Price</TH>
-                  <TH className="text-right">Credit</TH>
-                  <TH>Status</TH>
+                  <TH sort={billSorter.column("date")}>Date</TH>
+                  <TH sort={billSorter.column("bill")}>Bill No.</TH>
+                  <TH sort={billSorter.column("store")}>Store</TH>
+                  <TH sort={billSorter.column("item")}>Item</TH>
+                  <TH sort={billSorter.column("type")}>Type</TH>
+                  <TH className="text-right" sort={billSorter.column("qty")}>
+                    Qty
+                  </TH>
+                  <TH className="text-right" sort={billSorter.column("price")}>
+                    Price
+                  </TH>
+                  <TH className="text-right" sort={billSorter.column("credit")}>
+                    Credit
+                  </TH>
+                  <TH sort={billSorter.column("status")}>Status</TH>
                 </tr>
               </THead>
               <TBody>
@@ -474,15 +501,19 @@ export function ReturnsPage() {
             <Table>
               <THead>
                 <tr>
-                  <TH>Return No.</TH>
-                  <TH>Date Sent</TH>
-                  <TH>Raigam Ref.</TH>
-                  <TH className="text-right">Good</TH>
-                  <TH className="text-right">Market</TH>
-                  <TH className="text-right" title="At the credit price on the bills the note was matched to">
+                  <TH sort={sentSorter.column("returnNo")}>Return No.</TH>
+                  <TH sort={sentSorter.column("date")}>Date Sent</TH>
+                  <TH sort={sentSorter.column("reference")}>Raigam Ref.</TH>
+                  <TH className="text-right" sort={sentSorter.column("good")}>
+                    Good
+                  </TH>
+                  <TH className="text-right" sort={sentSorter.column("market")}>
+                    Market
+                  </TH>
+                  <TH className="text-right" title="At the credit price on the bills the note was matched to" sort={sentSorter.column("value")}>
                     Value
                   </TH>
-                  <TH>Note</TH>
+                  <TH sort={sentSorter.column("note")}>Note</TH>
                   <TH className="w-24">
                     <span className="sr-only">Actions</span>
                   </TH>
@@ -556,19 +587,20 @@ export function ReturnsPage() {
 function ReturnBills({ lines, shopName, sent }: { lines: BillReturn[]; shopName: (shopId: string) => string; sent: Map<string, ReturnSentInfo> }) {
   if (!lines.length) return <p className="py-2 text-xs text-slate-500">Not on any bill.</p>;
   return (
+    <SortScope>
     <table className="w-full text-xs">
       <thead className="text-left text-xs font-medium text-slate-500">
         <tr className="border-b border-slate-200">
-          <th className="py-2 pr-3 font-semibold">Date</th>
-          <th className="py-2 pr-3 font-semibold">Bill No.</th>
-          <th className="py-2 pr-3 font-semibold">Store</th>
-          <th className="py-2 pr-3 text-right font-semibold">Qty</th>
-          <th className="py-2 pr-3 text-right font-semibold">Price</th>
-          <th className="py-2 pr-3 text-right font-semibold">Credit</th>
-          <th className="py-2 font-semibold">Status</th>
+          <SortTh className="py-2 pr-3 font-semibold">Date</SortTh>
+          <SortTh className="py-2 pr-3 font-semibold">Bill No.</SortTh>
+          <SortTh className="py-2 pr-3 font-semibold">Store</SortTh>
+          <SortTh className="py-2 pr-3 text-right font-semibold">Qty</SortTh>
+          <SortTh className="py-2 pr-3 text-right font-semibold">Price</SortTh>
+          <SortTh className="py-2 pr-3 text-right font-semibold">Credit</SortTh>
+          <SortTh className="py-2 font-semibold">Status</SortTh>
         </tr>
       </thead>
-      <tbody className="divide-y divide-slate-200">
+      <SortTbody className="divide-y divide-slate-200">
         {lines.map(({ sale, ret, collected, date }) => (
           <tr key={`${sale.id}|${ret.id}`}>
             <td className="py-1.5 pr-3 whitespace-nowrap tabular-nums">{formatDate(date)}</td>
@@ -587,7 +619,7 @@ function ReturnBills({ lines, shopName, sent }: { lines: BillReturn[]; shopName:
             </td>
           </tr>
         ))}
-      </tbody>
+      </SortTbody>
       {lines.length > 1 && (
         <tfoot>
           <tr className="border-t border-slate-300 font-semibold text-slate-900">
@@ -602,7 +634,15 @@ function ReturnBills({ lines, shopName, sent }: { lines: BillReturn[]; shopName:
         </tfoot>
       )}
     </table>
+    </SortScope>
   );
+}
+
+/** The status ReturnStatus shows, as text (to sort by) */
+function returnStatusLabel(qty: number, collected: boolean, sent?: ReturnSentInfo) {
+  if (!collected) return "To collect";
+  if (!sent?.sent) return "In Return Items";
+  return sent.sent >= qty ? "Sent to Raigam" : `${formatQty(sent.sent)} of ${formatQty(qty)} sent`;
 }
 
 /**

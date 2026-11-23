@@ -204,8 +204,8 @@ export function SearchSelect({
         onBlur={close}
         onKeyDown={onKeyDown}
         className={cn(
-          "h-10 w-full truncate rounded-lg border border-slate-300 bg-white pr-8 pl-3 text-sm shadow-sm",
-          "focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 focus:outline-none",
+          "h-9 w-full truncate rounded-lg border border-slate-200 bg-white pr-8 pl-3 text-sm shadow-[0_1px_2px_rgb(16_18_27/0.04)] transition-[border-color,box-shadow] hover:border-slate-300 pointer-coarse:h-11",
+          "focus:border-brand-500 focus:ring-4 focus:ring-brand-500/15 focus:outline-none",
           "aria-[invalid=true]:border-red-400 aria-[invalid=true]:ring-red-500/20",
           // The picked option is the placeholder (read out to screen readers) but drawn by the span below
           selected && !open ? "placeholder:text-transparent" : "placeholder:text-slate-400",
@@ -228,7 +228,7 @@ export function SearchSelect({
           role="listbox"
           // Keep focus in the box so clicking an option (or the scrollbar) doesn't close the list first
           onMouseDown={(e) => e.preventDefault()}
-          className="fixed z-[60] overflow-y-auto rounded-lg border border-slate-200 bg-white py-1 text-sm shadow-lg"
+          className="fixed z-[60] overflow-y-auto rounded-xl border border-slate-200/80 bg-white p-1 text-sm shadow-raised"
         >
           {shown.length === 0 && <li className="px-3 py-2 text-slate-500">No matches for “{query}”</li>}
           {shown.map((o, i) => (
@@ -251,7 +251,7 @@ export function SearchSelect({
                   onMouseMove={() => i !== active && setActive(i)}
                   onClick={() => choose(o)}
                   className={cn(
-                    "flex cursor-pointer items-center gap-2 px-3 py-2 font-medium text-brand-700",
+                    "flex cursor-pointer items-center gap-2 rounded-lg px-3 py-2 font-medium text-brand-700",
                     i > 0 && "border-t border-slate-100",
                     i === active && "bg-brand-50",
                   )}
@@ -269,7 +269,7 @@ export function SearchSelect({
                   onMouseMove={() => !o.disabled && i !== active && setActive(i)}
                   onClick={() => choose(o)}
                   className={cn(
-                    "flex cursor-pointer items-center gap-2 px-3 py-1.5",
+                    "flex cursor-pointer items-center gap-2 rounded-lg px-3 py-2",
                     i === active && !o.disabled && "bg-brand-50",
                     o.disabled && "cursor-not-allowed opacity-45",
                   )}

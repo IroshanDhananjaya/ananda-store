@@ -11,7 +11,7 @@ import { DateRangePicker, type DateRange } from "@/components/ui/date-range-pick
 import { Select } from "@/components/ui/form";
 import { Card, FilterTabs, PageHeader, SearchInput, SummaryTile, TableFooter, Toolbar } from "@/components/ui/layout";
 import { Pagination, usePagination } from "@/components/ui/pagination";
-import { EmptyRow, RowActions, Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
+import { EmptyRow, RowActions, SortScope, SortTbody, SortTh, Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { claimBillCount, claimBySale, claimUnits, claimValue, freeOf, freeValueOf, isClaimPaid } from "@/lib/free-issues";
 import { chargedQty } from "@/lib/ledger";
 import { useAppStore, useItemMap, useSaleDues, useShopMap } from "@/lib/store";
@@ -503,20 +503,21 @@ function ItemBills({
   claimBadge: (saleId: string, delivered: boolean) => ReactNode;
 }) {
   return (
+    <SortScope>
     <table className="w-full text-xs">
       <thead className="text-left text-xs font-medium text-slate-500">
         <tr className="border-b border-slate-200">
-          <th className="py-2 pr-3 font-semibold">Date</th>
-          <th className="py-2 pr-3 font-semibold">Bill No.</th>
-          <th className="py-2 pr-3 font-semibold">Store</th>
-          <th className="py-2 pr-3 text-right font-semibold">Qty</th>
-          <th className="py-2 pr-3 text-right font-semibold">Free Qty</th>
-          <th className="py-2 pr-3 text-right font-semibold">Free Value</th>
-          <th className="py-2 pr-3 font-semibold">Status</th>
-          <th className="py-2 font-semibold">Claim</th>
+          <SortTh className="py-2 pr-3 font-semibold">Date</SortTh>
+          <SortTh className="py-2 pr-3 font-semibold">Bill No.</SortTh>
+          <SortTh className="py-2 pr-3 font-semibold">Store</SortTh>
+          <SortTh className="py-2 pr-3 text-right font-semibold">Qty</SortTh>
+          <SortTh className="py-2 pr-3 text-right font-semibold">Free Qty</SortTh>
+          <SortTh className="py-2 pr-3 text-right font-semibold">Free Value</SortTh>
+          <SortTh className="py-2 pr-3 font-semibold">Status</SortTh>
+          <SortTh className="py-2 font-semibold">Claim</SortTh>
         </tr>
       </thead>
-      <tbody className="divide-y divide-slate-200">
+      <SortTbody className="divide-y divide-slate-200">
         {lines.map((x) => (
           <tr key={`${x.sale.id}|${x.line.id}`}>
             <td className="py-1.5 pr-3 whitespace-nowrap tabular-nums">{formatDate(x.date)}</td>
@@ -542,7 +543,8 @@ function ItemBills({
             <td className="py-1.5">{claimBadge(x.sale.id, x.sale.status === "Delivered")}</td>
           </tr>
         ))}
-      </tbody>
+      </SortTbody>
     </table>
+    </SortScope>
   );
 }

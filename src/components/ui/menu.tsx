@@ -133,7 +133,7 @@ export function Menu({
           role="menu"
           aria-label={ariaLabel}
           onKeyDown={onListKey}
-          className="fixed z-[60] w-max max-w-[min(20rem,calc(100vw-1rem))] min-w-52 rounded-lg border border-slate-200 bg-white py-1 shadow-xl"
+          className="fixed z-[60] w-max max-w-[min(20rem,calc(100vw-1rem))] min-w-52 rounded-xl border border-slate-200/80 bg-white p-1 shadow-raised"
         >
           {list.map((e, i) =>
             "heading" in e ? (
@@ -159,7 +159,7 @@ export function Menu({
                   e.onSelect();
                 }}
                 className={cn(
-                  "flex w-full items-start gap-2.5 px-3 py-2 text-left text-sm hover:bg-slate-50 focus:bg-slate-100 focus:outline-none",
+                  "flex w-full items-start gap-2.5 rounded-lg px-3 py-2 text-left text-sm hover:bg-slate-100/80 focus:bg-slate-100 focus:outline-none",
                   "[&_svg]:mt-0.5 [&_svg]:size-4 [&_svg]:shrink-0",
                   e.danger ? "text-red-600" : "text-slate-800 [&_svg]:text-slate-500",
                   e.until && hiddenFrom[e.until],

@@ -9,7 +9,7 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Select } from "@/components/ui/form";
 import { Card, ClearFilters, FilterTabs, PageHeader, SearchInput, SummaryTile, TableFooter, Toolbar } from "@/components/ui/layout";
 import { Pagination, usePagination } from "@/components/ui/pagination";
-import { EmptyRow, GroupRow, RowActions, Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
+import { EmptyRow, GroupRow, RowActions, Table, TBody, TD, TH, THead, TR, useRowSort } from "@/components/ui/table";
 import { categoryOf, compareByCategory } from "@/lib/categories";
 import { useAppStore, useCategoryRanks, useItemMap } from "@/lib/store";
 import type { Item, StockRecord } from "@/lib/types";
@@ -71,7 +71,19 @@ export function StockPage() {
   const noCost = rows.filter((r) => missingCost(r, itemMap.get(r.sapCode))).length;
   const filtered = !!(query || location || category || level !== "all");
 
-  const pager = usePagination(rows, [query, location, level, category]);
+  // A column header sorts every record (not just this page); the category headings step aside meanwhile
+  const sorter = useRowSort(rows, {
+    code: (r) => r.sapCode,
+    name: (r) => itemMap.get(r.sapCode)?.description,
+    pack: (r) => itemMap.get(r.sapCode)?.packageDetails,
+    location: (r) => r.locationNumber,
+    available: (r) => r.availableQty,
+    issued: (r) => r.issuedQty,
+    cost: (r) => itemMap.get(r.sapCode)?.costPrice || null,
+    value: (r) => costValue(r),
+    updated: (r) => r.lastUpdate,
+  });
+  const pager = usePagination(sorter.rows, [query, location, level, category, sorter.key]);
 
   return (
     <>
@@ -175,19 +187,23 @@ export function StockPage() {
         <Table>
           <THead>
             <tr>
-              <TH>SAP Code</TH>
-              <TH>Item Description</TH>
-              <TH>Package Type</TH>
-              <TH>Store Location</TH>
-              <TH className="text-right">Available QTY</TH>
-              <TH className="text-right">Issued</TH>
-              <TH className="text-right" title="What Raigam is paid per unit">
+              <TH sort={sorter.column("code")}>SAP Code</TH>
+              <TH sort={sorter.column("name")}>Item Description</TH>
+              <TH sort={sorter.column("pack")}>Package Type</TH>
+              <TH sort={sorter.column("location")}>Store Location</TH>
+              <TH className="text-right" sort={sorter.column("available")}>
+                Available QTY
+              </TH>
+              <TH className="text-right" sort={sorter.column("issued")}>
+                Issued
+              </TH>
+              <TH className="text-right" title="What Raigam is paid per unit" sort={sorter.column("cost")}>
                 Cost Price
               </TH>
-              <TH className="text-right" title="Available qty × cost price">
+              <TH className="text-right" title="Available qty × cost price" sort={sorter.column("value")}>
                 Stock Value
               </TH>
-              <TH>Last Update</TH>
+              <TH sort={sorter.column("updated")}>Last Update</TH>
               <TH className="w-32">
                 <span className="sr-only">Actions</span>
               </TH>
@@ -201,7 +217,7 @@ export function StockPage() {
               return (
                 <Fragment key={r.id}>
                   {/* A category heading where it starts, and on top of each page */}
-                  {(i === 0 || categoryOfRow(r) !== categoryOfRow(pager.pageRows[i - 1])) && (
+                  {!sorter.active && (i === 0 || categoryOfRow(r) !== categoryOfRow(pager.pageRows[i - 1])) && (
                     <GroupRow colSpan={10}>
                       {categoryOfRow(r)} <span className="font-normal text-slate-500 normal-case">· {perCategory.get(categoryOfRow(r))?.length ?? 0} records</span>
                     </GroupRow>

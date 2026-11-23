@@ -10,13 +10,14 @@ import { Field } from "@/components/ui/form";
 import { FilterTabs } from "@/components/ui/layout";
 import { Modal } from "@/components/ui/modal";
 import { SearchSelect, type SearchOption } from "@/components/ui/search-select";
-import { StackBox } from "@/components/ui/table";
+import { SortScope, SortTbody, SortTh, StackBox } from "@/components/ui/table";
 import { readRaigamBills, readRaigamItems } from "@/lib/actions";
 import { wholesaleDifference } from "@/lib/ledger";
 import {
   billsNeedingItems,
   planRaigamSync,
   RAIGAM_ITEMS_BATCH,
+  RAIGAM_MAX_DAYS,
   suggestItem,
   type BillChanges,
   type ItemPicks,
@@ -30,11 +31,26 @@ import {
 } from "@/lib/raigam";
 import { goToLogin, useAppStore } from "@/lib/store";
 import type { Item } from "@/lib/types";
-import { cn, formatDate, formatMoney, formatQty } from "@/lib/utils";
+import { addDays, cn, formatDate, formatMoney, formatQty } from "@/lib/utils";
 
 type Step = "dates" | "reading" | "review" | "saving";
 /** Bill list tabs, by what happens to the bill */
-type Tab = "add" | "update" | "problem" | "rest";
+type Tab = "all" | "add" | "update" | "problem" | "rest";
+/** Where a bill is on Raigam, as the tabs of Raigam's invoice page */
+type RaigamStatus = "booking" | "actual" | "late" | "cancelled";
+
+function raigamStatusOf(b: RaigamBill): RaigamStatus {
+  if (b.cancelled) return "cancelled";
+  if (b.delivered) return "actual";
+  return b.late ? "late" : "booking";
+}
+
+const RAIGAM_STATUS: Record<RaigamStatus, { label: string; tone: ComponentProps<typeof Badge>["tone"] }> = {
+  booking: { label: "Booking", tone: "blue" },
+  actual: { label: "Actual", tone: "green" },
+  late: { label: "Late delivery", tone: "amber" },
+  cancelled: { label: "Cancelled", tone: "red" },
+};
 
 const TAB_OF: Record<SyncAction, Tab> = { add: "add", update: "update", problem: "problem", same: "rest", kept: "rest", ignore: "rest" };
 /** Rows listed at most (the counts cover them all) */
@@ -44,8 +60,8 @@ const MAX_STORE_NAMES = 20;
 
 const plural = (n: number, word: string) => `${formatQty(n)} ${word}${n === 1 ? "" : "s"}`;
 
-function countByTab(plan: SyncPlan) {
-  const counts: Record<Tab, number> = { add: 0, update: 0, problem: 0, rest: 0 };
+function countByTab(plan: Pick<SyncPlan, "rows">) {
+  const counts: Record<Tab, number> = { all: plan.rows.length, add: 0, update: 0, problem: 0, rest: 0 };
   for (const r of plan.rows) counts[TAB_OF[r.action]]++;
   return counts;
 }
@@ -63,6 +79,37 @@ function sureMatches(bills: RaigamBill[], data: SyncData): ItemPicks {
   }
   return picks;
 }
+
+/** Your items to pick from, and what each Raigam item is matched to (a pick in the dialog, else the match made before) */
+function useMatching(data: SyncData, picks: ItemPicks) {
+  const itemMap = useMemo(() => new Map(data.items.map((i) => [i.sapCode, i])), [data.items]);
+  const linked = useMemo(
+    () => new Map(data.raigamLinks.filter((l) => l.kind === "Item" && itemMap.has(l.appId)).map((l) => [l.raigamId, l.appId])),
+    [data.raigamLinks, itemMap],
+  );
+  // Matching goes by name, so the name leads and the SAP code is underneath; pack size and wholesale price help tell items apart
+  const options = useMemo<SearchOption[]>(
+    () =>
+      data.items.map((i) => ({
+        value: i.sapCode,
+        label: i.description,
+        description: i.sapCode,
+        hint: [i.packageDetails, i.wholesalePrice > 0 ? formatMoney(i.wholesalePrice) : ""].filter(Boolean).join(" · "),
+      })),
+    [data.items],
+  );
+  return useMemo(
+    () => ({
+      linked,
+      options,
+      items: data.items,
+      matchOf: (id: number) => (picks[id] && itemMap.has(picks[id]) ? picks[id] : (linked.get(id) ?? "")),
+    }),
+    [linked, options, data.items, picks, itemMap],
+  );
+}
+
+type Matching = ReturnType<typeof useMatching>;
 
 function useSyncData(): SyncData {
   const items = useAppStore((s) => s.items);
@@ -87,13 +134,19 @@ export function RaigamSyncDialog({ from, to, onClose }: { from: string; to: stri
   const [progress, setProgress] = useState("");
   const [bills, setBills] = useState<RaigamBill[]>([]);
   const [picks, setPicks] = useState<ItemPicks>({});
-  const [tab, setTab] = useState<Tab>("add");
+  const [tab, setTab] = useState<Tab>("all");
+  /** Bills shown by where they are on Raigam ("all" = every bill booked on the dates) */
+  const [status, setStatus] = useState<RaigamStatus | "all">("all");
   /** What the last save couldn't do */
   const [notes, setNotes] = useState<string[]>([]);
 
   const plan = useMemo(() => planRaigamSync(data, bills, picks), [data, bills, picks]);
+  const matching = useMatching(data, picks);
+  const pick = (itemId: number, sapCode: string) => setPicks((p) => ({ ...p, [itemId]: sapCode }));
   const counts = countByTab(plan);
   const toSave = counts.add + counts.update;
+  const statusRows = plan.rows.filter((r) => status === "all" || raigamStatusOf(r.bill) === status);
+  const shownCounts = countByTab({ rows: statusRows });
 
   async function check(e: FormEvent) {
     e.preventDefault();
@@ -106,11 +159,18 @@ export function RaigamSyncDialog({ from, to, onClose }: { from: string; to: stri
     setStep("reading");
     setProgress("Signing in to Raigam…");
     try {
-      const listed = await readRaigamBills(range.from, range.to);
-      if ("signedOut" in listed) return goToLogin();
-      if ("error" in listed) return back(listed.error);
+      // Every bill booked from the From date to the To date: a long range is read in parts
+      const listed: RaigamBill[] = [];
+      for (let start = range.from; start <= range.to; start = addDays(start, RAIGAM_MAX_DAYS + 1)) {
+        const end = [addDays(start, RAIGAM_MAX_DAYS), range.to].sort()[0];
+        if (start !== range.from) setProgress(`Reading the bills booked ${formatDate(start)} – ${formatDate(end)}…`);
+        const part = await readRaigamBills(start, end);
+        if ("signedOut" in part) return goToLogin();
+        if ("error" in part) return back(part.error);
+        listed.push(...part.bills);
+      }
       // Items are only read for bills that may be added or changed
-      const ids = billsNeedingItems(useAppStore.getState().sales, listed.bills);
+      const ids = billsNeedingItems(useAppStore.getState().sales, listed);
       const lines: Record<number, RaigamLine[]> = {};
       for (let i = 0; i < ids.length; i += RAIGAM_ITEMS_BATCH) {
         setProgress(`Reading the items on ${plural(ids.length, "bill")}… ${Math.round((i / ids.length) * 100)}%`);
@@ -119,7 +179,7 @@ export function RaigamSyncDialog({ from, to, onClose }: { from: string; to: stri
         if ("error" in read) return back(read.error);
         Object.assign(lines, read.lines);
       }
-      const full = listed.bills
+      const full = [...new Map(listed.map((b) => [b.id, b])).values()]
         .map((b) => (lines[b.id] ? { ...b, lines: lines[b.id] } : b))
         .sort((a, b) => a.date.localeCompare(b.date) || a.invoiceNo.localeCompare(b.invoiceNo));
       const state = useAppStore.getState();
@@ -127,7 +187,9 @@ export function RaigamSyncDialog({ from, to, onClose }: { from: string; to: stri
       const first = countByTab(planRaigamSync(state, full, firstPicks));
       setBills(full);
       setPicks(firstPicks);
-      setTab((["add", "update", "problem"] as const).find((t) => first[t] > 0) ?? "rest");
+      // Every bill booked on the dates, unless some can't be saved yet: those need a look first
+      setTab(first.problem > 0 ? "problem" : "all");
+      setStatus("all");
       setStep("review");
     } catch {
       back("Couldn't reach the server. Check the internet connection and try again.");
@@ -171,7 +233,7 @@ export function RaigamSyncDialog({ from, to, onClose }: { from: string; to: stri
     <Modal
       open
       onClose={busy ? () => {} : onClose}
-      size="lg"
+      size="xl"
       title="Sync from Raigam"
       description={
         step === "review"
@@ -209,7 +271,11 @@ export function RaigamSyncDialog({ from, to, onClose }: { from: string; to: stri
             New bills are added, and bills already here that changed on Raigam (and aren&apos;t delivered yet) are updated. You&apos;ll see
             everything before it&apos;s saved.
           </p>
-          <Field label="Booked between" htmlFor="syncDates">
+          <Field
+            label="Booked between"
+            htmlFor="syncDates"
+            hint="Every bill with its booking date in these dates: still booked, made Actual (delivered), late or cancelled since."
+          >
             <DateRangePicker id="syncDates" value={range} onChange={setRange} clearable={false} className="h-10" />
           </Field>
         </form>
@@ -237,21 +303,28 @@ export function RaigamSyncDialog({ from, to, onClose }: { from: string; to: stri
               </ul>
             </div>
           )}
-          <RaigamTotals bills={bills} />
-          <ItemMatching bills={bills} data={data} picks={picks} onPick={(itemId, sapCode) => setPicks((p) => ({ ...p, [itemId]: sapCode }))} />
+          <RaigamTotals bills={bills} value={status} onChange={setStatus} />
+          <ItemMatching bills={bills} matching={matching} onPick={pick} />
           <NewStores plan={plan} />
           <div className="flex flex-col gap-2">
             <FilterTabs<Tab>
               value={tab}
               onChange={setTab}
               options={[
-                { value: "add", label: "New", count: counts.add },
-                { value: "update", label: "Changed", count: counts.update },
-                { value: "problem", label: "Can't save yet", count: counts.problem },
-                { value: "rest", label: "Nothing to do", count: counts.rest },
+                { value: "all", label: "All", count: shownCounts.all },
+                { value: "add", label: "New", count: shownCounts.add },
+                { value: "update", label: "Changed", count: shownCounts.update },
+                { value: "problem", label: "Can't save yet", count: shownCounts.problem },
+                { value: "rest", label: "Nothing to do", count: shownCounts.rest },
               ]}
             />
-            <BillRows rows={plan.rows.filter((r) => TAB_OF[r.action] === tab)} plan={plan} data={data} />
+            <BillRows
+              rows={statusRows.filter((r) => tab === "all" || TAB_OF[r.action] === tab)}
+              plan={plan}
+              data={data}
+              matching={matching}
+              onPick={pick}
+            />
           </div>
         </div>
       )}
@@ -259,25 +332,59 @@ export function RaigamSyncDialog({ from, to, onClose }: { from: string; to: stri
   );
 }
 
-/** Invoice count and value per tab of Raigam's invoice page, to compare with it (and with Daily Invoices once saved) */
-function RaigamTotals({ bills }: { bills: RaigamBill[] }) {
-  const tabs = [
-    { label: "Booking", bills: bills.filter((b) => !b.cancelled && !b.delivered && !b.late) },
-    { label: "Actual", bills: bills.filter((b) => !b.cancelled && b.delivered) },
-    { label: "Late delivery", bills: bills.filter((b) => !b.cancelled && !b.delivered && b.late) },
-    { label: "Cancelled", bills: bills.filter((b) => b.cancelled) },
+/**
+ * Invoice count and value per tab of Raigam's invoice page, to compare with it (and with Daily Invoices once saved).
+ * Each is also the filter for the bill list below.
+ */
+function RaigamTotals({
+  bills,
+  value,
+  onChange,
+}: {
+  bills: RaigamBill[];
+  value: RaigamStatus | "all";
+  onChange: (v: RaigamStatus | "all") => void;
+}) {
+  const sum = (list: RaigamBill[], f: (b: RaigamBill) => number) => list.reduce((n, b) => n + f(b), 0);
+  const tabs: { key: RaigamStatus | "all"; label: string; bills: RaigamBill[] }[] = [
+    { key: "all", label: "All booked", bills },
+    ...(["booking", "actual", "late", "cancelled"] as const).map((key) => ({
+      key,
+      label: RAIGAM_STATUS[key].label,
+      bills: bills.filter((b) => raigamStatusOf(b) === key),
+    })),
   ];
   return (
     <section>
-      <h3 className="mb-2 text-xs font-medium text-slate-500">On Raigam for these dates</h3>
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-        {tabs.map((t) => (
-          <div key={t.label} className={cn("rounded-lg border border-slate-200 px-3 py-2", t.bills.length === 0 && "opacity-60")}>
-            <p className="text-xs text-slate-500">{t.label}</p>
-            <p className="text-lg font-semibold text-slate-900 tabular-nums">{formatQty(t.bills.length)}</p>
-            <p className="text-xs text-slate-600 tabular-nums">{formatMoney(t.bills.reduce((sum, b) => sum + b.total, 0))}</p>
-          </div>
-        ))}
+      <h3 className="mb-2 text-xs font-medium text-slate-500">On Raigam, booked on these dates · pick one to list only those bills</h3>
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+        {tabs.map((t) => {
+          const on = value === t.key;
+          return (
+            <button
+              key={t.key}
+              type="button"
+              onClick={() => onChange(t.key)}
+              aria-pressed={on}
+              className={cn(
+                "rounded-lg border px-3 py-2 text-left transition-colors",
+                on ? "border-brand-500 bg-brand-50 ring-1 ring-brand-500" : "border-slate-200 hover:bg-slate-50",
+                !on && t.bills.length === 0 && "opacity-60",
+              )}
+            >
+              <p className="text-xs text-slate-500">{t.label}</p>
+              <p className="text-lg font-semibold text-slate-900 tabular-nums">{formatQty(t.bills.length)}</p>
+              <p className="text-xs text-slate-600 tabular-nums" title="Booked value">
+                {formatMoney(sum(t.bills, (b) => b.total))}
+              </p>
+              {t.key === "actual" && t.bills.length > 0 && (
+                <p className="text-xs text-emerald-700 tabular-nums" title="Actual (delivered) value">
+                  Actual {formatMoney(sum(t.bills, (b) => b.actualTotal))}
+                </p>
+              )}
+            </button>
+          );
+        })}
       </div>
     </section>
   );
@@ -286,21 +393,15 @@ function RaigamTotals({ bills }: { bills: RaigamBill[] }) {
 /** Raigam items on the bills and the items here they stand for: new ones to match, and (on request) the ones matched before */
 function ItemMatching({
   bills,
-  data,
-  picks,
+  matching,
   onPick,
 }: {
   bills: RaigamBill[];
-  data: SyncData;
-  picks: ItemPicks;
+  matching: Matching;
   onPick: (itemId: number, sapCode: string) => void;
 }) {
   const [showAll, setShowAll] = useState(false);
-  const itemMap = useMemo(() => new Map(data.items.map((i) => [i.sapCode, i])), [data.items]);
-  const linked = useMemo(
-    () => new Map(data.raigamLinks.filter((l) => l.kind === "Item" && itemMap.has(l.appId)).map((l) => [l.raigamId, l.appId])),
-    [data.raigamLinks, itemMap],
-  );
+  const { linked, matchOf, options, items } = matching;
   const raigamItems = useMemo(() => {
     // Raigam's price for each item: the one on most of these bills
     const map = new Map<number, { itemId: number; itemName: string; bills: number; prices: Map<number, number> }>();
@@ -316,20 +417,8 @@ function ItemMatching({
       .map(({ prices, ...i }) => ({ ...i, price: [...prices].sort((a, b) => b[1] - a[1])[0]?.[0] ?? 0 }))
       .sort((a, b) => a.itemName.localeCompare(b.itemName));
   }, [bills]);
-  // Matching goes by name, so the name leads and the SAP code is underneath; pack size and wholesale price help tell items apart
-  const options = useMemo<SearchOption[]>(
-    () =>
-      data.items.map((i) => ({
-        value: i.sapCode,
-        label: i.description,
-        description: i.sapCode,
-        hint: [i.packageDetails, i.wholesalePrice > 0 ? formatMoney(i.wholesalePrice) : ""].filter(Boolean).join(" · "),
-      })),
-    [data.items],
-  );
 
   if (raigamItems.length === 0) return null;
-  const matchOf = (id: number) => (picks[id] && itemMap.has(picks[id]) ? picks[id] : (linked.get(id) ?? ""));
   const fresh = raigamItems.filter((i) => !linked.has(i.itemId));
   const unmatched = fresh.filter((i) => !matchOf(i.itemId)).length;
   const shown = showAll ? raigamItems : fresh;
@@ -360,7 +449,7 @@ function ItemMatching({
               item={i}
               value={matchOf(i.itemId)}
               options={options}
-              items={data.items}
+              items={items}
               onPick={(sapCode) => onPick(i.itemId, sapCode)}
             />
           ))}
@@ -376,12 +465,18 @@ function ItemMatchRow({
   options,
   items,
   onPick,
+  detail,
+  flag,
 }: {
   item: { itemName: string; bills: number; price: number };
   value: string;
   options: SearchOption[];
   items: Item[];
   onPick: (sapCode: string) => void;
+  /** In place of "On Raigam · N bills · price" */
+  detail?: string;
+  /** Why this match stops the bill */
+  flag?: string;
 }) {
   // Nothing picked yet: offer the closest name (never picked for you unless the names are the same)
   const suggestion = useMemo(() => {
@@ -396,9 +491,9 @@ function ItemMatchRow({
       <div className="min-w-0">
         <span className="block truncate text-sm font-medium text-slate-900">{item.itemName}</span>
         <span className="text-xs text-slate-500">
-          On Raigam · {plural(item.bills, "bill")}
-          {item.price > 0 && ` · ${formatMoney(item.price)}`}
+          {detail ?? `On Raigam · ${plural(item.bills, "bill")}${item.price > 0 ? ` · ${formatMoney(item.price)}` : ""}`}
         </span>
+        {flag && <span className="block text-xs font-medium text-amber-800">{flag}</span>}
         {picked && picked.wholesalePrice > 0 && (
           <span className={cn("block text-xs", priceDiff ? "font-medium text-amber-700" : "text-emerald-700")}>
             Your wholesale {formatMoney(picked.wholesalePrice)}
@@ -467,7 +562,71 @@ function rowBadge(r: SyncRow): { tone: Tone; label: string } {
   return badges[r.action];
 }
 
-function BillRows({ rows, plan, data }: { rows: SyncRow[]; plan: SyncPlan; data: SyncData }) {
+/** A bill that can't be saved yet, item by item: its unmatched items, each with its picker (the rest on request) */
+function BillItemMatches({ lines, matching, onPick }: { lines: RaigamLine[]; matching: Matching; onPick: (itemId: number, sapCode: string) => void }) {
+  const [showAll, setShowAll] = useState(false);
+  const { matchOf, options, items } = matching;
+  // Each Raigam item once, its quantities added together
+  const byItem = new Map<number, RaigamLine>();
+  for (const l of lines) {
+    const had = byItem.get(l.itemId);
+    byItem.set(l.itemId, had ? { ...had, qty: had.qty + l.qty, freeQty: had.freeQty + l.freeQty } : l);
+  }
+  const all = [...byItem.values()];
+  const flagOf = (l: RaigamLine) => (matchOf(l.itemId) ? undefined : "Not matched: pick your item");
+  const flagged = all.filter((l) => flagOf(l));
+  const shown = showAll ? all : flagged;
+  if (all.length === 0) return null;
+
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="text-xs font-medium text-slate-700">
+          {flagged.length ? `${plural(flagged.length, "item")} on this bill to fix` : "Items on this bill"}
+        </span>
+        <button type="button" onClick={() => setShowAll((v) => !v)} className="text-xs font-medium text-brand-700 hover:underline">
+          {showAll ? "Show only items to fix" : `Show all ${plural(all.length, "item")} on this bill`}
+        </button>
+      </div>
+      {shown.length > 0 && (
+        <div className="divide-y divide-slate-200/70 rounded-md border border-slate-200 bg-white px-3">
+          {shown.map((l) => (
+            <ItemMatchRow
+              key={l.itemId}
+              item={{ itemName: l.itemName, bills: 1, price: l.unitPrice }}
+              detail={[
+                `${formatQty(l.qty)} × ${formatMoney(l.unitPrice)}`,
+                l.freeQty > 0 && `${formatQty(l.freeQty)} free`,
+                l.discountPct > 0 && `${l.discountPct}% off`,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+              flag={flagOf(l)}
+              value={matchOf(l.itemId)}
+              options={options}
+              items={items}
+              onPick={(sapCode) => onPick(l.itemId, sapCode)}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function BillRows({
+  rows,
+  plan,
+  data,
+  matching,
+  onPick,
+}: {
+  rows: SyncRow[];
+  plan: SyncPlan;
+  data: SyncData;
+  matching: Matching;
+  onPick: (itemId: number, sapCode: string) => void;
+}) {
   const shopName = useMemo(() => new Map(data.shops.map((s) => [s.id, s.shopName])), [data.shops]);
   const itemName = useMemo(() => new Map(data.items.map((i) => [i.sapCode, i.description])), [data.items]);
   /** Bills whose changes are shown */
@@ -500,16 +659,20 @@ function BillRows({ rows, plan, data }: { rows: SyncRow[]; plan: SyncPlan; data:
         </div>
       )}
       <StackBox>
+        <SortScope>
         <table className="w-full text-sm">
           <thead className="bg-slate-50 text-left text-xs font-medium text-slate-500">
             <tr>
-              <th className="px-3 py-2">Invoice</th>
-              <th className="px-3 py-2">Store</th>
-              <th className="px-3 py-2 text-right">Total</th>
-              <th className="px-3 py-2">What happens</th>
+              <SortTh className="px-3 py-2">Invoice</SortTh>
+              <SortTh className="px-3 py-2">Booked</SortTh>
+              <SortTh className="px-3 py-2">Store</SortTh>
+              <SortTh className="px-3 py-2">On Raigam</SortTh>
+              <SortTh className="px-3 py-2 text-right">Booked Value</SortTh>
+              <SortTh className="px-3 py-2 text-right">Actual Value</SortTh>
+              <SortTh className="px-3 py-2">What happens</SortTh>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-100">
+          <SortTbody className="divide-y divide-slate-100">
             {rows.slice(0, MAX_ROWS).map((r) => {
               const ref = plan.stores.get(r.bill.outletId);
               const badge = rowBadge(r);
@@ -518,11 +681,9 @@ function BillRows({ rows, plan, data }: { rows: SyncRow[]; plan: SyncPlan; data:
                 <tr className="align-top">
                   <td className="px-3 py-2">
                     <span className="font-mono text-xs font-semibold text-slate-900">{r.bill.invoiceNo}</span>
-                    <span className="block text-xs text-slate-500">
-                      {formatDate(r.bill.date)}
-                      {r.sale && ` · ${r.sale.saleNo}`}
-                    </span>
+                    {r.sale && <span className="block text-xs text-slate-500">{r.sale.saleNo}</span>}
                   </td>
+                  <td className="px-3 py-2 tabular-nums">{formatDate(r.bill.date)}</td>
                   <td className="px-3 py-2">
                     <span className="text-slate-900">{(ref?.shopId && shopName.get(ref.shopId)) || r.bill.outletName}</span>
                     {ref && "name" in ref && (
@@ -532,12 +693,23 @@ function BillRows({ rows, plan, data }: { rows: SyncRow[]; plan: SyncPlan; data:
                     )}
                     <span className="block text-xs text-slate-500">{r.bill.routeName}</span>
                   </td>
+                  <td className="px-3 py-2">
+                    <Badge tone={RAIGAM_STATUS[raigamStatusOf(r.bill)].tone}>{RAIGAM_STATUS[raigamStatusOf(r.bill)].label}</Badge>
+                    {r.bill.actualDate && <span className="block text-xs text-slate-500 tabular-nums">{formatDate(r.bill.actualDate)}</span>}
+                  </td>
                   <td className="px-3 py-2 text-right tabular-nums">
                     {formatMoney(r.bill.total)}
                     {r.differentTotal !== undefined && (
                       <span className="block text-xs text-amber-700" title="Our total for this bill isn't the same as Raigam's">
                         Here {formatMoney(r.differentTotal)}
                       </span>
+                    )}
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums">
+                    {r.bill.delivered ? (
+                      <span className={cn(Math.abs(r.bill.actualTotal - r.bill.total) > 0.05 && "text-amber-700")}>{formatMoney(r.bill.actualTotal)}</span>
+                    ) : (
+                      <span className="text-slate-400">—</span>
                     )}
                   </td>
                   <td className="px-3 py-2 whitespace-normal">
@@ -556,9 +728,16 @@ function BillRows({ rows, plan, data }: { rows: SyncRow[]; plan: SyncPlan; data:
                     )}
                   </td>
                 </tr>
+                {r.action === "problem" && r.bill.lines && (
+                  <tr>
+                    <td colSpan={7} className="bg-amber-50/50 px-3 py-2">
+                      <BillItemMatches lines={r.bill.lines} matching={matching} onPick={onPick} />
+                    </td>
+                  </tr>
+                )}
                 {r.changes && open.has(r.bill.id) && (
                   <tr>
-                    <td colSpan={4} className="bg-slate-50/70 px-3 py-2">
+                    <td colSpan={7} className="bg-slate-50/70 px-3 py-2">
                       <ChangeDetails changes={r.changes} itemName={itemName} storeName={(id) => storeName(id, r.bill.outletId)} />
                     </td>
                   </tr>
@@ -566,8 +745,9 @@ function BillRows({ rows, plan, data }: { rows: SyncRow[]; plan: SyncPlan; data:
                 </Fragment>
               );
             })}
-          </tbody>
+          </SortTbody>
         </table>
+        </SortScope>
       </StackBox>
       {rows.length > MAX_ROWS && (
         <p className="border-t border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-500">
@@ -657,22 +837,24 @@ function ChangeDetails({
 
   return (
     <div className="flex flex-col gap-1.5 text-xs">
+      <SortScope>
       <table className="w-full">
         <thead className="text-left text-xs font-medium text-slate-500">
           <tr>
-            <th className="w-2/5 py-1 pr-3">What changes</th>
-            <th className="py-1">Here now → from Raigam</th>
+            <SortTh className="w-2/5 py-1 pr-3">What changes</SortTh>
+            <SortTh className="py-1">Here now → from Raigam</SortTh>
           </tr>
         </thead>
-        <tbody className="divide-y divide-slate-200/70">
+        <SortTbody className="divide-y divide-slate-200/70">
           {rows.map((r) => (
             <tr key={r.key} className="align-top">
               <td className="py-1.5 pr-3 text-slate-800">{r.what}</td>
               <td className="py-1.5">{r.change}</td>
             </tr>
           ))}
-        </tbody>
+        </SortTbody>
       </table>
+      </SortScope>
       <p className="flex flex-wrap items-center gap-1.5 border-t border-slate-200 pt-1.5 text-slate-600">
         Bill total
         {totalMoves ? (

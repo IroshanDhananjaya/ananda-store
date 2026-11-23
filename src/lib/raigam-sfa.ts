@@ -103,6 +103,8 @@ export async function listRaigamBills(from: string, to: string): Promise<RaigamB
       cancelled: cancelledIds.has(i.id) || i.isActive === false,
       late: lateIds.has(i.id) || i.isLateDelivery === true,
       delivered: i.isActual === true,
+      actualDate: i.isActual === true ? text(i.dateActual).slice(0, 10) : "",
+      actualTotal: i.isActual === true ? num(i.totalActualValue) : 0,
       discountPct: num(i.discountPercentage),
       total: num(i.totalBookFinalValue),
     });

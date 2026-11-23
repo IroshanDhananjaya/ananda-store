@@ -6,9 +6,9 @@ import { useState, type FormEvent, type KeyboardEvent } from "react";
 import { toast } from "@/lib/toast";
 import { LineStatusBadge } from "@/components/ui/badge";
 import { Button, buttonClass } from "@/components/ui/button";
-import { Field, Input, ReadOnlyValue, toNumber } from "@/components/ui/form";
+import { Field, Input, ReadOnlyValue, Select, toNumber } from "@/components/ui/form";
 import { SearchSelect } from "@/components/ui/search-select";
-import { Card, CardHeader } from "@/components/ui/layout";
+import { Card, CardHeader, FilterTabs } from "@/components/ui/layout";
 import { EmptyRow, Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { useAppStore, useItemMap, useLastInvoicePrices } from "@/lib/store";
 import type { Order, OrderInput, OrderItem, OrderLineInput } from "@/lib/types";
@@ -16,10 +16,33 @@ import { cn, formatMoney, formatQty, lineStatus, newId, nextOrderId, NOT_PAID, n
 import { OrderPaymentFields, orderPaymentErrors } from "./order-payment";
 
 type HeaderDraft = OrderInput;
-type LineDraft = { key: string; itemCode: string; orderedQty: string; receivedQty: string; unitPrice: string; discount: string; remarks: string };
-type DraftErrors = Partial<Record<"itemCode" | "orderedQty" | "receivedQty" | "unitPrice" | "discount", string>>;
+type LineDraft = {
+  key: string;
+  itemCode: string;
+  orderedQty: string;
+  receivedQty: string;
+  unitPrice: string;
+  discount: string;
+  remarks: string;
+  /** The Raigam invoice it came on ("" = none / missing) and the qty printed on it */
+  invoiceId: string;
+  invoicedQty: string;
+};
+type DraftErrors = Partial<Record<"itemCode" | "orderedQty" | "receivedQty" | "unitPrice" | "discount" | "invoicedQty", string>>;
+/** Items shown in the list: all, or one invoice's ("none" = on no invoice) */
+type LineFilter = "all" | "none" | `inv:${string}`;
 
-const emptyDraft = (): LineDraft => ({ key: newId(), itemCode: "", orderedQty: "", receivedQty: "0", unitPrice: "", discount: "0", remarks: "" });
+const emptyDraft = (invoiceId = ""): LineDraft => ({
+  key: newId(),
+  itemCode: "",
+  orderedQty: "",
+  receivedQty: "0",
+  unitPrice: "",
+  discount: "0",
+  remarks: "",
+  invoiceId,
+  invoicedQty: "",
+});
 
 const numbersOf = (l: LineDraft) => ({
   orderedQty: toNumber(l.orderedQty),
@@ -80,20 +103,31 @@ export function OrderForm({
           unitPrice: String(l.unitPrice),
           discount: String(l.discount),
           remarks: l.remarks,
+          invoiceId: l.invoiceId,
+          invoicedQty: l.invoiceId ? String(l.invoicedQty) : "",
         }))
       : prefill.map((itemCode) => ({ ...emptyDraft(), key: `prefill-${itemCode}`, itemCode, unitPrice: priceFor(itemCode) }));
   const [lines, setLines] = useState<LineDraft[]>(startLines);
+  // The order's Raigam invoices: once it has some, each item is edited on the invoice it came on
+  const invoices = order ? orderInvoices.filter((i) => i.orderId === order.orderId) : [];
+  const invoiceWise = invoices.length > 0;
+  const invoiceLabel = (id: string) => {
+    const n = invoices.findIndex((i) => i.id === id);
+    return n < 0 ? "" : invoices[n].invoiceNumber || `Invoice ${n + 1}`;
+  };
+  const [show, setShow] = useState<LineFilter>("all");
+  // A new item goes on the invoice shown in the list, else the first one
+  const newDraft = () => emptyDraft(show.startsWith("inv:") ? show.slice(4) : (invoices[0]?.id ?? ""));
   // The add/edit panel; it opens on the first line still missing its quantity
-  const [draft, setDraft] = useState<LineDraft>(() => startLines().find((l) => !isComplete(l)) ?? emptyDraft());
+  const [draft, setDraft] = useState<LineDraft>(() => startLines().find((l) => !isComplete(l)) ?? emptyDraft(invoices[0]?.id ?? ""));
   const [editingKey, setEditingKey] = useState<string | null>(() => startLines().find((l) => !isComplete(l))?.key ?? null);
   const [draftErrors, setDraftErrors] = useState<DraftErrors>({});
 
-  // Each item keeps the Raigam invoice it came on (set when receiving the order); the bill is worked out from the invoices
-  const savedLine = new Map(initialLines.map((l) => [l.itemCode, l]));
+  // Each item is on the Raigam invoice it came on; once received, the bill is worked out from the invoices
   const withInvoice = (l: LineDraft) => ({
     ...numbersOf(l),
-    invoiceId: savedLine.get(l.itemCode)?.invoiceId ?? "",
-    invoicedQty: savedLine.get(l.itemCode)?.invoicedQty ?? 0,
+    invoiceId: l.invoiceId,
+    invoicedQty: l.invoiceId ? toNumber(l.invoicedQty) : 0,
   });
   const valueOf = (l: LineDraft) => orderLineValue(withInvoice(l), header);
   const [headerErrors, setHeaderErrors] = useState<Partial<Record<keyof HeaderDraft, string>>>({});
@@ -117,7 +151,14 @@ export function OrderForm({
     setHeader((h) => ({ ...h, [key]: e.target.value }));
 
   function setDraftField(patch: Partial<LineDraft>) {
-    setDraft((d) => ({ ...d, ...patch }));
+    setDraft((d) => {
+      const next = { ...d, ...patch };
+      // The qty on the invoice follows what came (or what was ordered) until it's typed differently
+      const qtyOf = (l: LineDraft) => (l.receivedQty && l.receivedQty !== "0" ? l.receivedQty : l.orderedQty);
+      if (!("invoicedQty" in patch) && next.invoiceId && (d.invoicedQty === "" || d.invoicedQty === qtyOf(d))) next.invoicedQty = qtyOf(next);
+      if (!next.invoiceId) next.invoicedQty = "";
+      return next;
+    });
     setDraftErrors({});
   }
 
@@ -136,7 +177,9 @@ export function OrderForm({
     if (!isWhole(d.receivedQty)) e.receivedQty = "A whole number, 0 or more.";
     if (d.unitPrice === "" || toNumber(d.unitPrice) < 0) e.unitPrice = "Enter the price.";
     const n = numbersOf(d);
-    if (n.discount < 0 || n.discount > Math.max(n.orderedQty, n.receivedQty) * n.unitPrice) e.discount = "More than the line amount.";
+    if (d.invoiceId && (!isWhole(d.invoicedQty) || toNumber(d.invoicedQty) === 0)) e.invoicedQty = "The qty on the invoice, above 0.";
+    const invoiced = d.invoiceId ? toNumber(d.invoicedQty) : 0;
+    if (n.discount < 0 || n.discount > Math.max(n.orderedQty, n.receivedQty, invoiced) * n.unitPrice) e.discount = "More than the line amount.";
     return e;
   }
 
@@ -155,7 +198,7 @@ export function OrderForm({
     setFormError(undefined);
     // Next line still missing its quantity, else a fresh panel for the next item
     const next = nextLines.find((l) => !isComplete(l));
-    setDraft(next ?? emptyDraft());
+    setDraft(next ?? newDraft());
     setEditingKey(next?.key ?? null);
     focusField(next ? "orderDraftQty" : "orderDraftItem");
   }
@@ -169,7 +212,7 @@ export function OrderForm({
   }
 
   function cancelEdit() {
-    setDraft(emptyDraft());
+    setDraft(newDraft());
     setEditingKey(null);
     setDraftErrors({});
   }
@@ -191,8 +234,14 @@ export function OrderForm({
   }
 
   function copyOrderedToReceived() {
-    setLines((ls) => ls.map((l) => ({ ...l, receivedQty: l.orderedQty || "0" })));
-    if (editingKey) setDraft((d) => ({ ...d, receivedQty: d.orderedQty || "0" }));
+    // An invoice qty that followed what came keeps following it
+    const copy = (l: LineDraft): LineDraft => ({
+      ...l,
+      receivedQty: l.orderedQty || "0",
+      invoicedQty: l.invoiceId && (l.invoicedQty === "" || l.invoicedQty === l.receivedQty) ? l.orderedQty : l.invoicedQty,
+    });
+    setLines((ls) => ls.map(copy));
+    if (editingKey) setDraft(copy);
   }
 
   function validate() {
@@ -233,6 +282,8 @@ export function OrderForm({
       unitPrice: toNumber(l.unitPrice),
       discount: toNumber(l.discount),
       remarks: l.remarks,
+      // Only an order with invoices says which one each item is on (else they're kept as they are)
+      ...(invoiceWise ? { invoiceId: l.invoiceId, invoicedQty: l.invoiceId ? toNumber(l.invoicedQty) : 0 } : {}),
     }));
     const result = await (order ? updateOrder(order.id, input, lineInputs) : createOrder(input, lineInputs));
     if (!result.ok) {
@@ -308,13 +359,36 @@ export function OrderForm({
           description={
             isNew
               ? "Add items one at a time in the box below; they're listed underneath. When the goods arrive, use Receive order on the order page."
-              : "Add items one at a time in the box below; they're listed underneath. Match / Unmatch is worked out once a received date is entered."
+              : invoiceWise
+                ? "Add items one at a time in the box below, each on the Raigam invoice it came on. Pick an invoice to see its items; new items go on it."
+                : "Add items one at a time in the box below; they're listed underneath. Match / Unmatch is worked out once a received date is entered."
           }
           actions={
             !isNew && (
-              <Button variant="outline" size="sm" onClick={copyOrderedToReceived} disabled={lines.length === 0}>
-                <ClipboardCheck /> Received = Ordered
-              </Button>
+              <div className="flex flex-wrap items-center gap-2">
+                {invoiceWise && (
+                  <FilterTabs<LineFilter>
+                    value={show}
+                    onChange={(v) => {
+                      setShow(v);
+                      // A new item (not one being edited) goes on the invoice picked
+                      if (!editingKey && v.startsWith("inv:")) setDraftField({ invoiceId: v.slice(4) });
+                    }}
+                    options={[
+                      { value: "all", label: "All", count: lines.length },
+                      ...invoices.map((i, n) => ({
+                        value: `inv:${i.id}` as const,
+                        label: i.invoiceNumber || `Invoice ${n + 1}`,
+                        count: lines.filter((l) => l.invoiceId === i.id).length,
+                      })),
+                      ...(lines.some((l) => !l.invoiceId) ? [{ value: "none" as const, label: "No invoice", count: lines.filter((l) => !l.invoiceId).length }] : []),
+                    ]}
+                  />
+                )}
+                <Button variant="outline" size="sm" onClick={copyOrderedToReceived} disabled={lines.length === 0}>
+                  <ClipboardCheck /> Received = Ordered
+                </Button>
+              </div>
             )
           }
         />
@@ -327,6 +401,7 @@ export function OrderForm({
           <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
             <p className="text-sm font-semibold text-slate-900">
               {editingKey ? `Edit item ${editingIndex + 1}${isComplete(draft) ? "" : " · add its quantity"}` : "Add an item"}
+              {invoiceWise && draft.invoiceId && <span className="font-normal text-slate-500"> · on invoice {invoiceLabel(draft.invoiceId)}</span>}
             </p>
             {editingKey && (
               <button type="button" onClick={cancelEdit} className="text-sm font-medium text-slate-600 hover:text-slate-900 hover:underline">
@@ -419,13 +494,45 @@ export function OrderForm({
                 className="text-right tabular-nums"
               />
             </Field>
-            <Field label="Remarks" htmlFor="orderDraftRemarks" className="sm:col-span-2 lg:col-span-3">
+            {invoiceWise && (
+              <>
+                <Field label="Invoice" htmlFor="orderDraftInvoice">
+                  <Select id="orderDraftInvoice" value={draft.invoiceId} onChange={(e) => setDraftField({ invoiceId: e.target.value, invoicedQty: "" })}>
+                    {invoices.map((i, n) => (
+                      <option key={i.id} value={i.id}>
+                        {i.invoiceNumber || `Invoice ${n + 1}`}
+                      </option>
+                    ))}
+                    <option value="">No invoice (missing)</option>
+                  </Select>
+                </Field>
+                <Field label="On Invoice Qty" htmlFor="orderDraftInvoiced" required={!!draft.invoiceId} error={draftErrors.invoicedQty}>
+                  <Input
+                    id="orderDraftInvoiced"
+                    type="number"
+                    min={1}
+                    step={1}
+                    inputMode="numeric"
+                    value={draft.invoiceId ? draft.invoicedQty : ""}
+                    placeholder={draft.invoiceId ? "" : "—"}
+                    disabled={!draft.invoiceId}
+                    onChange={(e) => setDraftField({ invoicedQty: e.target.value })}
+                    aria-invalid={!!draftErrors.invoicedQty}
+                    className="text-right tabular-nums"
+                  />
+                </Field>
+              </>
+            )}
+            <Field label="Remarks" htmlFor="orderDraftRemarks" className={cn("sm:col-span-2", invoiceWise ? "lg:col-span-1" : "lg:col-span-3")}>
               <Input id="orderDraftRemarks" value={draft.remarks} onChange={(e) => setDraftField({ remarks: e.target.value })} placeholder="Optional" />
             </Field>
             <div className="flex items-end justify-between gap-3 sm:col-span-2 lg:col-span-2">
               <div className="pb-2">
                 <p className="text-xs text-slate-500">Line value</p>
                 <p className="text-base font-semibold text-slate-900 tabular-nums">{formatMoney(valueOf(draft))}</p>
+                {header.receivedDate && !draft.invoiceId && !!draft.itemCode && (
+                  <p className="text-xs text-amber-700">{invoiceWise ? "On no invoice, so not in the bill" : "Add a Raigam invoice on the order page to bill it"}</p>
+                )}
               </div>
               <Button onClick={saveDraft} className="shrink-0">
                 {editingKey ? (
@@ -450,6 +557,8 @@ export function OrderForm({
               <TH>Item</TH>
               <TH className="text-right">Ordered</TH>
               {!isNew && <TH className="text-right">Received</TH>}
+              {invoiceWise && <TH>Invoice</TH>}
+              {invoiceWise && <TH className="text-right">On Invoice</TH>}
               <TH className="text-right">Price</TH>
               <TH className="text-right">Discount</TH>
               <TH className="text-right">Value</TH>
@@ -461,8 +570,9 @@ export function OrderForm({
             </tr>
           </THead>
           <TBody>
-            {lines.length === 0 && <EmptyRow colSpan={isNew ? 8 : 10}>No items yet. Add the first one above.</EmptyRow>}
+            {lines.length === 0 && <EmptyRow colSpan={isNew ? 8 : invoiceWise ? 12 : 10}>No items yet. Add the first one above.</EmptyRow>}
             {lines.map((l, index) => {
+              if (show === "none" ? !!l.invoiceId : show !== "all" && `inv:${l.invoiceId}` !== show) return null;
               const item = itemMap.get(l.itemCode);
               const complete = isComplete(l);
               return (
@@ -482,6 +592,8 @@ export function OrderForm({
                     {complete ? formatQty(toNumber(l.orderedQty)) : <span className="text-xs font-medium text-amber-700">Add qty</span>}
                   </TD>
                   {!isNew && <TD className="text-right tabular-nums">{formatQty(toNumber(l.receivedQty))}</TD>}
+                  {invoiceWise && <TD>{l.invoiceId ? invoiceLabel(l.invoiceId) : <span className="text-amber-700">No invoice</span>}</TD>}
+                  {invoiceWise && <TD className="text-right tabular-nums">{l.invoiceId ? formatQty(toNumber(l.invoicedQty)) : "—"}</TD>}
                   <TD className="text-right tabular-nums">{l.unitPrice === "" ? "—" : formatMoney(toNumber(l.unitPrice))}</TD>
                   <TD className="text-right tabular-nums">{toNumber(l.discount) ? formatMoney(toNumber(l.discount)) : "—"}</TD>
                   <TD className="text-right font-medium text-slate-900 tabular-nums">{formatMoney(valueOf(l))}</TD>

@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Field, Input, Select, toNumber } from "@/components/ui/form";
 import { Modal } from "@/components/ui/modal";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { StackBox } from "@/components/ui/table";
+import { SortScope, SortTbody, SortTh, StackBox } from "@/components/ui/table";
 import { billDiscount, saleSubtotal, saleTotal } from "@/lib/ledger";
 import { useAppStore, useItemMap, useShopMap } from "@/lib/store";
 import type { Sale, SaleLine } from "@/lib/types";
@@ -287,10 +287,11 @@ function LoadForm({
 
         <div className="overflow-hidden rounded-lg border border-slate-200">
           <StackBox>
+            <SortScope>
             <table className="w-full text-sm">
               <thead className="bg-slate-50 text-left text-xs font-medium text-slate-500">
                 <tr>
-                  <th className="w-10 px-3 py-2">
+                  <SortTh className="w-10 px-3 py-2">
                     <input
                       type="checkbox"
                       className="size-4 accent-brand-600"
@@ -307,14 +308,14 @@ function LoadForm({
                       }
                       aria-label="Select all bills"
                     />
-                  </th>
-                  <th className="px-3 py-2">Bill</th>
-                  <th className="px-3 py-2">Store</th>
-                  <th className="px-3 py-2 text-right">Units</th>
-                  <th className="px-3 py-2 text-right">Total</th>
+                  </SortTh>
+                  <SortTh className="px-3 py-2">Bill</SortTh>
+                  <SortTh className="px-3 py-2">Store</SortTh>
+                  <SortTh className="px-3 py-2 text-right">Units</SortTh>
+                  <SortTh className="px-3 py-2 text-right">Total</SortTh>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
+              <SortTbody className="divide-y divide-slate-100">
                 {visible.length === 0 && (
                   <tr>
                     <td colSpan={5} className="px-3 py-8 text-center text-slate-500">
@@ -362,8 +363,9 @@ function LoadForm({
                     </tr>
                   );
                 })}
-              </tbody>
+              </SortTbody>
             </table>
+            </SortScope>
           </StackBox>
         </div>
 
@@ -379,19 +381,20 @@ function LoadForm({
             </p>
             <div className="overflow-hidden rounded-lg border border-slate-200">
               <StackBox>
+                <SortScope>
                 <table className="w-full text-sm">
                   <thead className="bg-slate-50 text-left text-xs font-medium text-slate-500">
                     <tr>
-                      <th className="px-3 py-2">Item</th>
-                      <th className="px-3 py-2">Location</th>
-                      <th className="px-3 py-2 text-right">Load</th>
-                      <th className="px-3 py-2 text-right">Stock now → after</th>
-                      <th className="px-3 py-2">
+                      <SortTh className="px-3 py-2">Item</SortTh>
+                      <SortTh className="px-3 py-2">Location</SortTh>
+                      <SortTh className="px-3 py-2 text-right">Load</SortTh>
+                      <SortTh className="px-3 py-2 text-right">Stock now → after</SortTh>
+                      <SortTh className="px-3 py-2">
                         <span className="sr-only">Reduce on bills</span>
-                      </th>
+                      </SortTh>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-100">
+                  <SortTbody className="divide-y divide-slate-100">
                     {sheet.map((r) => {
                       const short = r.have < r.qty;
                       // Open while the item is short (before missing is marked) or has missing units, or when asked for
@@ -487,8 +490,9 @@ function LoadForm({
                         </Fragment>
                       );
                     })}
-                  </tbody>
+                  </SortTbody>
                 </table>
+                </SortScope>
               </StackBox>
             </div>
             {missingItems > 0 && <p className="mt-2 text-xs text-slate-500">Reduced units come off the charged qty first, then the free issue.</p>}

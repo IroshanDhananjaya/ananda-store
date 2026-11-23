@@ -6,15 +6,16 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 import { toast } from "@/lib/toast";
 import { LoadLorryDialog } from "@/components/sales/load-lorry-dialog";
-import { BillStatusBadge, DueDateLabel } from "@/components/ui/badge";
+import { billLabel, BillStatusBadge, DueDateLabel } from "@/components/ui/badge";
 import { Button, buttonClass } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { DateRangePicker, type DateRange } from "@/components/ui/date-range-picker";
 import { Select } from "@/components/ui/form";
 import { Card, ClearFilters, FilterTabs, PageHeader, SearchInput, SummaryTile, TableFooter, Toolbar } from "@/components/ui/layout";
 import { Pagination, usePagination } from "@/components/ui/pagination";
-import { EmptyRow, RowActions, Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
+import { EmptyRow, RowActions, Table, TBody, TD, TH, THead, TR, useRowSort } from "@/components/ui/table";
 import type { SaleDue } from "@/lib/ledger";
+import { raigamInvoiceNo } from "@/lib/raigam";
 import { useAppStore, useItemMap, useRouteMap, useSaleDues, useShopMap } from "@/lib/store";
 import type { Sale } from "@/lib/types";
 import { useDialog } from "@/lib/use-dialog";
@@ -70,6 +71,10 @@ const FILTERS: Record<string, { show: Show; kind: Kind }> = {
   paid: { show: "paid", kind: "all" },
   cancelled: { show: "all", kind: "cancelled" },
 };
+
+/** A bill's place within its day: Raigam's invoice order (as on Raigam's invoice page), then bills without a Raigam invoice no. by bill no. */
+const billOrder = (s: Sale) => (s.invoiceNo ? `0${raigamInvoiceNo(s.invoiceNo)}` : `1${s.saleNo}`);
+const byBillOrder = (a: Sale, b: Sale) => billOrder(a).localeCompare(billOrder(b)) || a.saleNo.localeCompare(b.saleNo);
 
 function kindOf(s: Sale): Exclude<Kind, "all"> {
   if (s.status === "Cancelled") return "cancelled";
@@ -238,12 +243,12 @@ function InvoicesPage({
     });
   const rows = inView
     .filter((s) => kind === "all" || kindOf(s) === kind)
-    // Newest day first; within a day, in bill order
-    .sort((a, b) => dateOf(b).localeCompare(dateOf(a)) || a.saleNo.localeCompare(b.saleNo));
+    // Newest day first; within a day, in Raigam's invoice order
+    .sort((a, b) => dateOf(b).localeCompare(dateOf(a)) || byBillOrder(a, b));
 
   const byDay = Map.groupBy(rows, dateOf);
   // Ticked bills in view, in the list's order (oldest day first, like the cash sheet)
-  const chosen = [...rows].filter((s) => ticked.has(s.id)).sort((a, b) => dateOf(a).localeCompare(dateOf(b)) || a.saleNo.localeCompare(b.saleNo));
+  const chosen = [...rows].filter((s) => ticked.has(s.id)).sort((a, b) => dateOf(a).localeCompare(dateOf(b)) || byBillOrder(a, b));
   const allTicked = rows.length > 0 && chosen.length === rows.length;
   const tick = (ids: string[], on: boolean) =>
     setTicked((prev) => {
@@ -254,9 +259,21 @@ function InvoicesPage({
       }
       return next;
     });
-  const pager = usePagination(rows, [preset, from, to, dateBy, routeId, shopId, kind, show, query], PAGE_SIZE);
-  // The page's bills by day; a day's totals cover all its bills, also those on another page
-  const pageDays = [...Map.groupBy(pager.pageRows, dateOf)];
+  const units = (s: Sale) => s.lines.reduce((n, l) => n + l.qty, 0);
+  // A column header sorts every bill (not just this page); the day headings step aside meanwhile
+  const sorter = useRowSort(rows, {
+    bill: (s) => s.saleNo,
+    store: (s) => shopMap.get(s.shopId)?.shopName ?? "Deleted store",
+    items: (s) => s.lines.length,
+    total: (s) => due(s).total,
+    paid: (s) => due(s).paid,
+    balance: (s) => (due(s).delivered ? due(s).due : null),
+    status: (s) => `${billLabel[due(s).status]}${s.late && (due(s).status === "Ordered" || due(s).status === "Loaded") ? " Late" : ""}`,
+    checked: (s) => (s.invoiceNo ? (s.checked ? "Checked" : "Check") : null),
+  });
+  const pager = usePagination(sorter.rows, [preset, from, to, dateBy, routeId, shopId, kind, show, query, sorter.key], PAGE_SIZE);
+  // The page's bills by day; a day's totals cover all its bills, also those on another page. Sorted: one run, no days
+  const pageDays: [string, Sale[]][] = sorter.active ? [["", pager.pageRows]] : [...Map.groupBy(pager.pageRows, dateOf)];
   // Cancelled bills stay in the list but don't count in totals or the loading list,
   // except on the Cancelled tab, which counts and totals them like Raigam's does
   const live = rows.filter((s) => s.status !== "Cancelled");
@@ -265,7 +282,6 @@ function InvoicesPage({
   const itemCount = new Set(live.flatMap((s) => s.lines.map((l) => l.sapCode))).size;
 
   const sum = (list: Sale[], fn: (s: Sale) => number) => counted(list).reduce((acc, s) => acc + fn(s), 0);
-  const units = (s: Sale) => s.lines.reduce((n, l) => n + l.qty, 0);
   const total = sum(rows, (s) => due(s).total);
   const paid = sum(rows, (s) => due(s).paid);
   const balance = sum(rows, (s) => due(s).due);
@@ -508,17 +524,26 @@ function InvoicesPage({
                         title="Tick all bills in the list (every page)"
                       />
                     </TH>
-                    <TH>Bill No.</TH>
-                    <TH>Store</TH>
-                    <TH>Items</TH>
-                    <TH className="text-right">Total</TH>
-                    <TH className="text-right">Paid</TH>
-                    <TH className="text-right">Cash Balance</TH>
-                    <TH>Status</TH>
-                    <TH className="print:hidden" title="Compared with Raigam's printed bill">
+                    <TH sort={sorter.column("bill")}>Bill No.</TH>
+                    <TH sort={sorter.column("store")}>Store</TH>
+                    <TH sort={sorter.column("items")}>Items</TH>
+                    <TH className="text-right" sort={sorter.column("total")}>
+                      Total
+                    </TH>
+                    <TH className="text-right" sort={sorter.column("paid")}>
+                      Paid
+                    </TH>
+                    <TH className="text-right" sort={sorter.column("balance")}>
+                      Cash Balance
+                    </TH>
+                    <TH sort={sorter.column("status")}>Status</TH>
+                    <TH className="print:hidden" title="Compared with Raigam's printed bill" sort={sorter.column("checked")}>
                       Checked
                     </TH>
-                    <TH className="print:hidden">Change Status</TH>
+                    {/* A menu of actions, nothing to sort by */}
+                    <TH className="print:hidden" sortable={false}>
+                      Change Status
+                    </TH>
                     <TH className="w-28 print:hidden">
                       <span className="sr-only">Actions</span>
                     </TH>
@@ -532,9 +557,9 @@ function InvoicesPage({
                     </EmptyRow>
                   )}
                   {pageDays.map(([day, list]) => {
-                    const all = byDay.get(day)!;
+                    const all = byDay.get(day) ?? list;
                     return (
-                    <DayGroup key={day} day={day} count={counted(all).length} total={sum(all, (s) => due(s).total)} paid={sum(all, (s) => due(s).paid)} balance={sum(all, (s) => due(s).due)}>
+                    <DayGroup key={day} day={day} heading={!sorter.active} count={counted(all).length} total={sum(all, (s) => due(s).total)} paid={sum(all, (s) => due(s).paid)} balance={sum(all, (s) => due(s).due)}>
                       {list.map((s) => {
                         const shop = shopMap.get(s.shopId);
                         const d = due(s);
@@ -726,6 +751,7 @@ function DayGroup({
   total,
   paid,
   balance,
+  heading,
   children,
 }: {
   day: string;
@@ -733,21 +759,25 @@ function DayGroup({
   total: number;
   paid: number;
   balance: number;
+  /** Off while sorted by a column (the bills aren't by day then) */
+  heading: boolean;
   children: ReactNode;
 }) {
   return (
     <>
-      <tr className="bg-slate-100/80">
-        <td colSpan={COLUMNS} className="px-5 py-2">
-          <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1">
-            <span className="text-sm font-semibold text-slate-900">{dayLabel(day)}</span>
-            <span className="text-xs text-slate-600 tabular-nums">
-              {plural(count, "invoice")} · Total <span className="font-semibold text-slate-900">{formatMoney(total)}</span> · Paid{" "}
-              {formatMoney(paid)} · Balance {formatMoney(balance)}
-            </span>
-          </div>
-        </td>
-      </tr>
+      {heading && (
+        <tr className="bg-slate-100/80">
+          <td colSpan={COLUMNS} className="px-5 py-2">
+            <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1">
+              <span className="text-sm font-semibold text-slate-900">{dayLabel(day)}</span>
+              <span className="text-xs text-slate-600 tabular-nums">
+                {plural(count, "invoice")} · Total <span className="font-semibold text-slate-900">{formatMoney(total)}</span> · Paid{" "}
+                {formatMoney(paid)} · Balance {formatMoney(balance)}
+              </span>
+            </div>
+          </td>
+        </tr>
+      )}
       {children}
     </>
   );

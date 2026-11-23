@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button, buttonClass } from "@/components/ui/button";
 import { Card, CardHeader, TableFooter } from "@/components/ui/layout";
 import { Pagination, usePagination } from "@/components/ui/pagination";
-import { EmptyRow, Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
+import { EmptyRow, Table, TBody, TD, TH, THead, TR, useRowSort } from "@/components/ui/table";
 import { useItemMap, useLastInvoicePrices } from "@/lib/store";
 import type { StockRecord } from "@/lib/types";
 import { cn, CRITICAL_STOCK_LEVEL, formatMoney, formatQty, LOW_STOCK_LEVEL } from "@/lib/utils";
@@ -26,7 +26,16 @@ export function LowStockCard({ rows, needed }: { rows: StockRecord[]; needed: Ma
   const lastPrice = useLastInvoicePrices();
   // Ticked SAP codes; an item kept at two locations is one tick
   const [picked, setPicked] = useState<Set<string>>(() => new Set());
-  const pager = usePagination(rows);
+  // A column header sorts every item (not just this page)
+  const sorter = useRowSort(rows, {
+    item: (r) => itemMap.get(r.sapCode)?.description ?? r.sapCode,
+    location: (r) => r.locationNumber,
+    left: (r) => r.availableQty,
+    need: (r) => needed.get(`${r.sapCode}|${r.locationNumber}`) ?? 0,
+    price: (r) => lastPrice.get(r.sapCode),
+    level: (r) => (r.availableQty === 0 ? "Out of stock" : r.availableQty <= CRITICAL_STOCK_LEVEL ? "Critical" : "Low"),
+  });
+  const pager = usePagination(sorter.rows, [sorter.key]);
 
   const codes = [...new Set(rows.map((r) => r.sapCode))];
   const chosen = codes.filter((c) => picked.has(c));
@@ -69,14 +78,18 @@ export function LowStockCard({ rows, needed }: { rows: StockRecord[]; needed: Ma
                 aria-label="Select all items"
               />
             </TH>
-            <TH>Item</TH>
-            <TH>Location</TH>
-            <TH className="text-right">Left</TH>
-            <TH className="text-right" title="Quantity on bills waiting to load">
+            <TH sort={sorter.column("item")}>Item</TH>
+            <TH sort={sorter.column("location")}>Location</TH>
+            <TH className="text-right" sort={sorter.column("left")}>
+              Left
+            </TH>
+            <TH className="text-right" title="Quantity on bills waiting to load" sort={sorter.column("need")}>
               For bills to load
             </TH>
-            <TH className="text-right">Last Raigam price</TH>
-            <TH>Level</TH>
+            <TH className="text-right" sort={sorter.column("price")}>
+              Last Raigam price
+            </TH>
+            <TH sort={sorter.column("level")}>Level</TH>
             <TH>
               <span className="sr-only">Order</span>
             </TH>

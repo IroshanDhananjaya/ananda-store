@@ -9,7 +9,7 @@ import { Field, Input, Select, toNumber } from "@/components/ui/form";
 import { FilterTabs, SearchInput } from "@/components/ui/layout";
 import { Modal } from "@/components/ui/modal";
 import { SearchSelect } from "@/components/ui/search-select";
-import { StackBox } from "@/components/ui/table";
+import { SortScope, SortTbody, SortTh, StackBox } from "@/components/ui/table";
 import { useAppStore, useItemMap, useItemPickOptions, useLastInvoicePrices } from "@/lib/store";
 import type { Order, OrderInvoice, OrderInvoiceInput, OrderItem, ReceiveOrderInput } from "@/lib/types";
 import {
@@ -532,10 +532,11 @@ function ReceiveForm({ order, lines, onDone }: { order: Order; lines: OrderItem[
 
         <div className="overflow-x-auto rounded-lg border border-slate-200">
           <StackBox>
+            <SortScope>
             <table className="w-full min-w-[1200px] text-sm">
               <thead className="bg-slate-50 text-left text-xs font-medium text-slate-500">
                 <tr>
-                  <th className="w-10 py-2 pr-1 pl-3">
+                  <SortTh className="w-10 py-2 pr-1 pl-3">
                     <input
                       type="checkbox"
                       className={tick}
@@ -544,25 +545,25 @@ function ReceiveForm({ order, lines, onDone }: { order: Order; lines: OrderItem[
                       aria-label="Tick all items shown"
                       title="Tick all shown"
                     />
-                  </th>
-                  <th className="px-3 py-2">Item</th>
-                  <th className="px-3 py-2 text-right whitespace-nowrap">Ordered</th>
-                  <th className="w-48 px-3 py-2">Invoice</th>
-                  <th className="w-32 px-3 py-2 text-right whitespace-nowrap">On invoice</th>
-                  <th className="w-32 px-3 py-2 text-right">Received</th>
-                  <th className="w-36 px-3 py-2 text-right whitespace-nowrap">Price (Rs.)</th>
-                  <th className="w-28 px-3 py-2 text-right whitespace-nowrap" title="Rs. off the whole line, as printed on the invoice">
+                  </SortTh>
+                  <SortTh className="px-3 py-2">Item</SortTh>
+                  <SortTh className="px-3 py-2 text-right whitespace-nowrap">Ordered</SortTh>
+                  <SortTh className="w-48 px-3 py-2">Invoice</SortTh>
+                  <SortTh className="w-32 px-3 py-2 text-right whitespace-nowrap">On invoice</SortTh>
+                  <SortTh className="w-32 px-3 py-2 text-right">Received</SortTh>
+                  <SortTh className="w-36 px-3 py-2 text-right whitespace-nowrap">Price (Rs.)</SortTh>
+                  <SortTh className="w-28 px-3 py-2 text-right whitespace-nowrap" title="Rs. off the whole line, as printed on the invoice">
                     Discount
-                  </th>
-                  <th className="px-3 py-2 text-right">Value</th>
-                  <th className="px-3 py-2">Status</th>
-                  <th className="px-3 py-2">Remarks</th>
-                  <th className="w-10 px-1 py-2">
+                  </SortTh>
+                  <SortTh className="px-3 py-2 text-right">Value</SortTh>
+                  <SortTh className="px-3 py-2">Status</SortTh>
+                  <SortTh className="px-3 py-2">Remarks</SortTh>
+                  <SortTh className="w-10 px-1 py-2">
                     <span className="sr-only">Remove</span>
-                  </th>
+                  </SortTh>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
+              <SortTbody className="divide-y divide-slate-100">
                 {visible.length === 0 && (
                   <tr>
                     <td colSpan={12} className="px-3 py-6 text-center text-slate-500">
@@ -697,8 +698,9 @@ function ReceiveForm({ order, lines, onDone }: { order: Order; lines: OrderItem[
                     </tr>
                   );
                 })}
-              </tbody>
+              </SortTbody>
             </table>
+            </SortScope>
           </StackBox>
         </div>
 
@@ -756,6 +758,307 @@ export function ReceiveOrderDialog({
       }
     >
       <ReceiveForm order={order} lines={lines} onDone={onClose} />
+    </Modal>
+  );
+}
+
+// ---------- Add items to an invoice: a received order's invoice gets more items (e.g. a second invoice that came later) ----------
+
+type NewLine = {
+  key: string;
+  itemCode: string;
+  orderedQty: string;
+  invoicedQty: string;
+  receivedQty: string;
+  unitPrice: string;
+  discount: string;
+  remarks: string;
+};
+
+function AddItemsForm({ order, invoiceId, lines, onDone }: { order: Order; invoiceId: string; lines: OrderItem[]; onDone: () => void }) {
+  const orderInvoices = useAppStore((s) => s.orderInvoices);
+  const addOrderInvoiceItems = useAppStore((s) => s.addOrderInvoiceItems);
+  const itemMap = useItemMap();
+  const pickOptions = useItemPickOptions();
+  const lastPrice = useLastInvoicePrices();
+  const invoices = orderInvoices.filter((i) => i.orderId === order.orderId);
+  const [target, setTarget] = useState(invoiceId || invoices[0]?.id || "");
+  const [rows, setRows] = useState<NewLine[]>([]);
+  const [error, setError] = useState<string>();
+  const invoice = invoices.find((i) => i.id === target);
+  const onOrder = new Set(lines.map((l) => l.itemCode));
+
+  const valueOf = (r: NewLine) => round2(toNumber(r.invoicedQty) * toNumber(r.unitPrice) - toNumber(r.discount));
+  const linesTotal = round2(rows.reduce((s, r) => s + valueOf(r), 0));
+
+  function update(key: string, patch: Partial<NewLine>) {
+    setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...patch } : r)));
+    setError(undefined);
+  }
+
+  // Ordered and received follow the qty on the invoice until they're typed differently
+  const changeInvoiced = (r: NewLine, value: string) =>
+    update(r.key, {
+      invoicedQty: value,
+      orderedQty: r.orderedQty === r.invoicedQty ? value : r.orderedQty,
+      receivedQty: r.receivedQty === r.invoicedQty ? value : r.receivedQty,
+    });
+
+  function addRow(itemCode: string) {
+    if (!itemCode || onOrder.has(itemCode) || rows.some((r) => r.itemCode === itemCode)) return;
+    const key = `new-${newId()}`;
+    const price = lastPrice.get(itemCode);
+    setRows((rs) => [
+      ...rs,
+      {
+        key,
+        itemCode,
+        orderedQty: "",
+        invoicedQty: "",
+        receivedQty: "",
+        unitPrice: price === undefined ? "" : String(price),
+        discount: "",
+        remarks: "",
+      },
+    ]);
+    setError(undefined);
+    focusField(`addQty-${key}`);
+  }
+
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    if (!invoice) return setError("Pick the invoice the items came on.");
+    if (rows.length === 0) return setError("Find an item to add.");
+    for (const r of rows) {
+      const name = itemMap.get(r.itemCode)?.description ?? r.itemCode;
+      if (!isWhole(r.invoicedQty) || toNumber(r.invoicedQty) === 0) return setError(`Enter the qty on the invoice for ${name}.`);
+      if (r.orderedQty !== "" && !isWhole(r.orderedQty)) return setError(`Ordered qty of ${name} must be a whole number (0 if it wasn't ordered).`);
+      if (!isWhole(r.receivedQty)) return setError(`What came of ${name} must be a whole number (0 or more).`);
+      if (!isPrice(r.unitPrice)) return setError(`Enter the price of ${name} as on its invoice.`);
+      if (r.discount && (!isPrice(r.discount) || toNumber(r.discount) > toNumber(r.invoicedQty) * toNumber(r.unitPrice)))
+        return setError(`The discount on ${name} must be a Rs. amount no more than its qty × price.`);
+    }
+    const result = await addOrderInvoiceItems(
+      order.id,
+      invoice.id,
+      rows.map((r) => ({
+        itemCode: r.itemCode,
+        orderedQty: toNumber(r.orderedQty),
+        invoicedQty: toNumber(r.invoicedQty),
+        receivedQty: toNumber(r.receivedQty),
+        unitPrice: toNumber(r.unitPrice),
+        discount: toNumber(r.discount),
+        remarks: r.remarks,
+      })),
+    );
+    if (!result.ok) return void toast.error(result.error);
+    toast.success(`${rows.length} item${rows.length === 1 ? "" : "s"} added to ${invoiceName(invoice, invoices.indexOf(invoice))}`);
+    onDone();
+  }
+
+  return (
+    <form id="add-items-form" onSubmit={handleSubmit} noValidate className="flex flex-col gap-4">
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field label="Invoice" htmlFor="addItemsInvoice" required>
+          <Select id="addItemsInvoice" value={target} onChange={(e) => setTarget(e.target.value)}>
+            {invoices.map((i, n) => (
+              <option key={i.id} value={i.id}>
+                {invoiceName(i, n)}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="Add an item" htmlFor="addItemsPick">
+          <SearchSelect
+            id="addItemsPick"
+            value=""
+            onChange={addRow}
+            options={pickOptions.map((o) => ({
+              ...o,
+              disabled: onOrder.has(o.value) || rows.some((r) => r.itemCode === o.value),
+            }))}
+            placeholder="Find the item to add…"
+            aria-label="Find an item to add"
+            autoFocus
+          />
+        </Field>
+      </div>
+
+      <div className="overflow-x-auto rounded-lg border border-slate-200">
+        <SortScope>
+        <table className="w-full min-w-[960px] text-sm">
+          <thead className="bg-slate-50 text-left text-xs font-medium text-slate-500">
+            <tr>
+              <SortTh className="px-3 py-2">Item</SortTh>
+              <SortTh className="w-28 px-3 py-2 text-right whitespace-nowrap">On invoice</SortTh>
+              <SortTh className="w-28 px-3 py-2 text-right whitespace-nowrap" title="0 if it wasn't on the order (shown as Not ordered)">
+                Ordered
+              </SortTh>
+              <SortTh className="w-28 px-3 py-2 text-right">Received</SortTh>
+              <SortTh className="w-32 px-3 py-2 text-right whitespace-nowrap">Price (Rs.)</SortTh>
+              <SortTh className="w-28 px-3 py-2 text-right" title="Rs. off the whole line, as printed on the invoice">
+                Discount
+              </SortTh>
+              <SortTh className="px-3 py-2 text-right">Value</SortTh>
+              <SortTh className="px-3 py-2">Remarks</SortTh>
+              <SortTh className="w-10 px-1 py-2">
+                <span className="sr-only">Remove</span>
+              </SortTh>
+            </tr>
+          </thead>
+          <SortTbody className="divide-y divide-slate-100">
+            {rows.length === 0 && (
+              <tr>
+                <td colSpan={9} className="px-3 py-6 text-center text-slate-500">
+                  No items yet. Find each item on the invoice above to add it.
+                </td>
+              </tr>
+            )}
+            {rows.map((r) => (
+              <tr key={r.key}>
+                <td className="px-3 py-2">
+                  <span className="block font-medium text-slate-900">{itemMap.get(r.itemCode)?.description ?? r.itemCode}</span>
+                  <span className="font-mono text-xs text-slate-500">{r.itemCode}</span>
+                </td>
+                <td className="px-3 py-2">
+                  <Input
+                    id={`addQty-${r.key}`}
+                    type="number"
+                    min={1}
+                    step={1}
+                    inputMode="numeric"
+                    value={r.invoicedQty}
+                    onChange={(e) => changeInvoiced(r, e.target.value)}
+                    className="h-9 min-w-20 text-right tabular-nums"
+                    aria-label={`Qty of ${r.itemCode} on the invoice`}
+                  />
+                </td>
+                <td className="px-3 py-2">
+                  <Input
+                    type="number"
+                    min={0}
+                    step={1}
+                    inputMode="numeric"
+                    value={r.orderedQty}
+                    placeholder="0"
+                    onChange={(e) => update(r.key, { orderedQty: e.target.value })}
+                    className="h-9 min-w-20 text-right tabular-nums"
+                    aria-label={`Ordered qty of ${r.itemCode}`}
+                  />
+                </td>
+                <td className="px-3 py-2">
+                  <Input
+                    type="number"
+                    min={0}
+                    step={1}
+                    inputMode="numeric"
+                    value={r.receivedQty}
+                    onChange={(e) => update(r.key, { receivedQty: e.target.value })}
+                    className="h-9 min-w-20 text-right tabular-nums"
+                    aria-label={`Received qty of ${r.itemCode}`}
+                  />
+                </td>
+                <td className="px-3 py-2">
+                  <Input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    inputMode="decimal"
+                    value={r.unitPrice}
+                    onChange={(e) => update(r.key, { unitPrice: e.target.value })}
+                    className="h-9 min-w-24 text-right tabular-nums"
+                    aria-label={`Price of ${r.itemCode} on the invoice`}
+                  />
+                </td>
+                <td className="px-3 py-2">
+                  <Input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    inputMode="decimal"
+                    value={r.discount}
+                    placeholder="0"
+                    onChange={(e) => update(r.key, { discount: e.target.value })}
+                    className="h-9 min-w-20 text-right tabular-nums"
+                    aria-label={`Line discount of ${r.itemCode} (Rs.)`}
+                  />
+                </td>
+                <td className="px-3 py-2 text-right font-medium whitespace-nowrap text-slate-900 tabular-nums">{formatMoney(valueOf(r))}</td>
+                <td className="px-3 py-2">
+                  <Input
+                    value={r.remarks}
+                    onChange={(e) => update(r.key, { remarks: e.target.value })}
+                    placeholder="e.g. 2 damaged"
+                    className="h-9 min-w-32"
+                    aria-label={`Remarks for ${r.itemCode}`}
+                  />
+                </td>
+                <td className="px-1 py-2">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="hover:bg-red-50 hover:text-red-600"
+                    onClick={() => setRows((rs) => rs.filter((x) => x.key !== r.key))}
+                    aria-label={`Take ${r.itemCode} off`}
+                    title="Take off"
+                  >
+                    <X />
+                  </Button>
+                </td>
+              </tr>
+            ))}
+          </SortTbody>
+        </table>
+        </SortScope>
+      </div>
+
+      {invoice && rows.length > 0 && (
+        <div className="rounded-lg bg-slate-50 px-3 py-2.5">
+          <InvoiceSum items={rows.length} linesTotal={linesTotal} percent={invoice.discountPercent} />
+          <p className="mt-0.5 text-xs text-slate-500">
+            These items only, with {invoiceName(invoice, invoices.indexOf(invoice))}&apos;s discount %. Add them to stock from the order page after saving.
+          </p>
+        </div>
+      )}
+      {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+    </form>
+  );
+}
+
+/** Add items to one of a received order's invoices, from the order page */
+export function AddInvoiceItemsDialog({
+  order,
+  invoiceId,
+  lines,
+  open,
+  onClose,
+}: {
+  order: Order;
+  /** The invoice picked to start with ("" = the first) */
+  invoiceId: string;
+  lines: OrderItem[];
+  open: boolean;
+  onClose: () => void;
+}) {
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      size="xl"
+      title={`Add items to ${order.orderId}`}
+      description="The items printed on the invoice, with the qty, price and line discount as on it."
+      footer={
+        <>
+          <Button variant="outline" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button type="submit" form="add-items-form">
+            Add items
+          </Button>
+        </>
+      }
+    >
+      <AddItemsForm order={order} invoiceId={invoiceId} lines={lines} onDone={onClose} />
     </Modal>
   );
 }
@@ -868,10 +1171,11 @@ function PostForm({ order, lines, only, onDone }: { order: Order; lines: OrderIt
           </div>
           <div className="overflow-x-auto rounded-lg border border-slate-200">
             <StackBox>
+              <SortScope>
               <table className="w-full min-w-[860px] text-sm">
                 <thead className="bg-slate-50 text-left text-xs font-medium text-slate-500">
                   <tr>
-                    <th className="w-10 px-3 py-2">
+                    <SortTh className="w-10 px-3 py-2">
                       <input
                         type="checkbox"
                         className="size-4 cursor-pointer rounded accent-brand-600"
@@ -879,16 +1183,16 @@ function PostForm({ order, lines, only, onDone }: { order: Order; lines: OrderIt
                         onChange={(e) => setTicked(new Set(e.target.checked ? postable.map((l) => l.id) : []))}
                         aria-label="Tick all items"
                       />
-                    </th>
-                    <th className="px-3 py-2">Item</th>
-                    <th className="px-3 py-2 text-right">Received</th>
-                    <th className="w-36 px-3 py-2 text-right">Unit price (Rs.)</th>
-                    <th className="px-3 py-2 text-right">Total</th>
-                    <th className="px-3 py-2 text-right">In stock now</th>
-                    <th className="px-3 py-2">Store Location</th>
+                    </SortTh>
+                    <SortTh className="px-3 py-2">Item</SortTh>
+                    <SortTh className="px-3 py-2 text-right">Received</SortTh>
+                    <SortTh className="w-36 px-3 py-2 text-right">Unit price (Rs.)</SortTh>
+                    <SortTh className="px-3 py-2 text-right">Total</SortTh>
+                    <SortTh className="px-3 py-2 text-right">In stock now</SortTh>
+                    <SortTh className="px-3 py-2">Store Location</SortTh>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100">
+                <SortTbody className="divide-y divide-slate-100">
                   {postable.map((l) => {
                     const on = ticked.has(l.id);
                     const loc = locationByLine[l.id];
@@ -961,8 +1265,9 @@ function PostForm({ order, lines, only, onDone }: { order: Order; lines: OrderIt
                       </tr>
                     );
                   })}
-                </tbody>
+                </SortTbody>
               </table>
+              </SortScope>
             </StackBox>
           </div>
         </>
@@ -975,16 +1280,17 @@ function PostForm({ order, lines, only, onDone }: { order: Order; lines: OrderIt
         </p>
         {postable.length > 0 && (
           <div className="w-full overflow-x-auto rounded-lg border border-slate-200 lg:w-auto">
+            <SortScope>
             <table className="w-full text-sm">
               <thead className="bg-slate-50 text-left text-xs font-medium text-slate-500">
                 <tr>
-                  <th className="px-3 py-2">Invoice</th>
-                  <th className="px-3 py-2 text-right">Items total</th>
-                  <th className="px-3 py-2 text-right">Discount</th>
-                  <th className="px-3 py-2 text-right">Grand total</th>
+                  <SortTh className="px-3 py-2">Invoice</SortTh>
+                  <SortTh className="px-3 py-2 text-right">Items total</SortTh>
+                  <SortTh className="px-3 py-2 text-right">Discount</SortTh>
+                  <SortTh className="px-3 py-2 text-right">Grand total</SortTh>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100 tabular-nums">
+              <SortTbody className="divide-y divide-slate-100 tabular-nums">
                 {perInvoice.map(({ invoice, linesTotal, discount, total: grand }, n) => (
                   <tr key={invoice.id}>
                     <td className="px-3 py-1.5 whitespace-nowrap text-slate-700">{invoiceName(invoice, n)}</td>
@@ -1010,8 +1316,9 @@ function PostForm({ order, lines, only, onDone }: { order: Order; lines: OrderIt
                   </td>
                   <td className="px-3 py-2 text-right font-semibold text-slate-900">{formatMoney(total)}</td>
                 </tr>
-              </tbody>
+              </SortTbody>
             </table>
+            </SortScope>
           </div>
         )}
       </div>

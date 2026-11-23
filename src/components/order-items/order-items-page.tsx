@@ -4,7 +4,7 @@ import { Lock, Pencil, Plus, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useState, type FormEvent } from "react";
 import { toast } from "@/lib/toast";
-import { LineStatusBadge } from "@/components/ui/badge";
+import { lineLabel, LineStatusBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Field, Input, ReadOnlyValue, Select, toNumber } from "@/components/ui/form";
@@ -12,7 +12,7 @@ import { SearchSelect } from "@/components/ui/search-select";
 import { Card, FilterTabs, PageHeader, SearchInput, TableFooter, Toolbar } from "@/components/ui/layout";
 import { Modal } from "@/components/ui/modal";
 import { Pagination, usePagination } from "@/components/ui/pagination";
-import { EmptyRow, RowActions, Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
+import { EmptyRow, RowActions, Table, TBody, TD, TH, THead, TR, useRowSort } from "@/components/ui/table";
 import { useAppStore, useItemMap, useOrderMap } from "@/lib/store";
 import type { LineStatus, OrderItem } from "@/lib/types";
 import { useDialog } from "@/lib/use-dialog";
@@ -173,7 +173,24 @@ export function OrderItemsPage() {
 
   const editing = form.target === "new" ? null : form.target;
 
-  const pager = usePagination(rows, [query, orderFilter, status]);
+  // A column header sorts every line (not just this page)
+  const sorter = useRowSort(rows, {
+    order: (r) => r.line.orderId,
+    code: (r) => r.line.itemCode,
+    name: (r) => itemMap.get(r.line.itemCode)?.description ?? "Unknown item",
+    ordered: (r) => r.line.orderedQty,
+    received: (r) => r.line.receivedQty,
+    invoice: (r) => {
+      const invoice = invoiceMap.get(r.line.invoiceId);
+      return invoice ? invoice.invoiceNumber || "No number yet" : null;
+    },
+    price: (r) => r.line.unitPrice,
+    value: (r) => orderLineValue(r.line, r.order),
+    // The badge's label ("Extra" reads "Not ordered")
+    status: (r) => lineLabel[r.status],
+    remarks: (r) => r.line.remarks,
+  });
+  const pager = usePagination(sorter.rows, [query, orderFilter, status, sorter.key]);
 
   return (
     <>
@@ -218,18 +235,24 @@ export function OrderItemsPage() {
         <Table>
           <THead>
             <tr>
-              <TH>Order ID</TH>
-              <TH>Item Code</TH>
-              <TH>Item Name</TH>
-              <TH className="text-right">Ordered Qty</TH>
-              <TH className="text-right">Received Qty</TH>
-              <TH>Invoice</TH>
-              <TH className="text-right">Price</TH>
-              <TH className="text-right" title="Qty × price − discount">
+              <TH sort={sorter.column("order")}>Order ID</TH>
+              <TH sort={sorter.column("code")}>Item Code</TH>
+              <TH sort={sorter.column("name")}>Item Name</TH>
+              <TH className="text-right" sort={sorter.column("ordered")}>
+                Ordered Qty
+              </TH>
+              <TH className="text-right" sort={sorter.column("received")}>
+                Received Qty
+              </TH>
+              <TH sort={sorter.column("invoice")}>Invoice</TH>
+              <TH className="text-right" sort={sorter.column("price")}>
+                Price
+              </TH>
+              <TH className="text-right" title="Qty × price − discount" sort={sorter.column("value")}>
                 Value
               </TH>
-              <TH>Match / Unmatch</TH>
-              <TH>Remarks</TH>
+              <TH sort={sorter.column("status")}>Match / Unmatch</TH>
+              <TH sort={sorter.column("remarks")}>Remarks</TH>
               <TH className="w-24">
                 <span className="sr-only">Actions</span>
               </TH>

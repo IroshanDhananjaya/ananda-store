@@ -10,7 +10,7 @@ import { Button, buttonClass } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Card, FilterTabs, PageHeader, SearchInput, TableFooter, Toolbar } from "@/components/ui/layout";
 import { Pagination, usePagination } from "@/components/ui/pagination";
-import { EmptyRow, RowActions, Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
+import { EmptyRow, RowActions, Table, TBody, TD, TH, THead, TR, useRowSort } from "@/components/ui/table";
 import { useAppStore, useShopBalances } from "@/lib/store";
 import { WEEK_DAYS, type Route, type WeekDay } from "@/lib/types";
 import { useDialog } from "@/lib/use-dialog";
@@ -47,7 +47,17 @@ export function RoutesPage() {
     .sort((a, b) => a.routeCode.localeCompare(b.routeCode));
   const totalBalance = rows.reduce((sum, r) => sum + (stats.get(r.id)?.balance ?? 0), 0);
 
-  const pager = usePagination(rows, [query, day]);
+  // A column header sorts every route (not just this page)
+  const sorter = useRowSort(rows, {
+    code: (r) => r.routeCode,
+    name: (r) => r.routeName,
+    days: (r) => (r.visitDays.length ? Math.min(...r.visitDays.map((d) => WEEK_DAYS.indexOf(d))) : null),
+    rep: (r) => r.salesRep,
+    stores: (r) => stats.get(r.id)?.shops ?? 0,
+    balance: (r) => stats.get(r.id)?.balance ?? 0,
+    status: (r) => (r.active ? "Active" : "Inactive"),
+  });
+  const pager = usePagination(sorter.rows, [query, day, sorter.key]);
 
   return (
     <>
@@ -78,13 +88,17 @@ export function RoutesPage() {
         <Table>
           <THead>
             <tr>
-              <TH>Route No.</TH>
-              <TH>Route Name</TH>
-              <TH>Visit Days</TH>
-              <TH>Sales Rep</TH>
-              <TH className="text-right">Stores</TH>
-              <TH className="text-right">Cash Balance</TH>
-              <TH>Status</TH>
+              <TH sort={sorter.column("code")}>Route No.</TH>
+              <TH sort={sorter.column("name")}>Route Name</TH>
+              <TH sort={sorter.column("days")}>Visit Days</TH>
+              <TH sort={sorter.column("rep")}>Sales Rep</TH>
+              <TH className="text-right" sort={sorter.column("stores")}>
+                Stores
+              </TH>
+              <TH className="text-right" sort={sorter.column("balance")}>
+                Cash Balance
+              </TH>
+              <TH sort={sorter.column("status")}>Status</TH>
               <TH className="w-28">
                 <span className="sr-only">Actions</span>
               </TH>

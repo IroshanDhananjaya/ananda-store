@@ -82,7 +82,7 @@ export function ShopDetail({ id }: { id: string }) {
       />
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
-        <div className="rounded-lg border border-slate-200 bg-white px-5 py-4 shadow-sm">
+        <div className="rounded-2xl bg-white px-5 py-4 shadow-card">
           <p className="text-xs font-medium text-slate-500">Cash balance</p>
           <p className={cn("mt-1.5 text-xl font-semibold tracking-tight tabular-nums", over ? "text-red-600" : "text-slate-900")}>
             {formatMoney(b.balance)}

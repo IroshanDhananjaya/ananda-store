@@ -10,7 +10,7 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Field, Input, toNumber } from "@/components/ui/form";
 import { SearchSelect } from "@/components/ui/search-select";
 import { Card, CardHeader } from "@/components/ui/layout";
-import { StackBox } from "@/components/ui/table";
+import { SortScope, SortTbody, SortTh, StackBox } from "@/components/ui/table";
 import { useAppStore, useItemMap, useLastInvoicePrices } from "@/lib/store";
 import type { Item, OrderPayment, ReceiveLoadInput } from "@/lib/types";
 import { useDialog } from "@/lib/use-dialog";
@@ -391,21 +391,22 @@ export function ReceiveLoadForm({ onSaved, cancelHref }: { onSaved: (id: string)
 
                 <div className="relative overflow-x-auto">
                   <StackBox>
+                    <SortScope>
                     <table className="w-full min-w-[700px] text-sm">
                       <thead className="border-b border-slate-200 text-left text-xs font-medium text-slate-500">
                         <tr>
-                          <th className="w-12 py-2.5 pl-5">#</th>
-                          <th className="px-2 py-2.5">Item</th>
-                          <th className="w-24 px-2 py-2.5 text-right">Qty</th>
-                          <th className="w-28 px-2 py-2.5 text-right">Price</th>
-                          <th className="w-24 px-2 py-2.5 text-right">Discount</th>
-                          <th className="w-32 px-2 py-2.5 text-right">Value</th>
-                          <th className="w-12 py-2.5 pr-3">
+                          <SortTh className="w-12 py-2.5 pl-5">#</SortTh>
+                          <SortTh className="px-2 py-2.5">Item</SortTh>
+                          <SortTh className="w-24 px-2 py-2.5 text-right">Qty</SortTh>
+                          <SortTh className="w-28 px-2 py-2.5 text-right">Price</SortTh>
+                          <SortTh className="w-24 px-2 py-2.5 text-right">Discount</SortTh>
+                          <SortTh className="w-32 px-2 py-2.5 text-right">Value</SortTh>
+                          <SortTh className="w-12 py-2.5 pr-3">
                             <span className="sr-only">Remove</span>
-                          </th>
+                          </SortTh>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-slate-100">
+                      <SortTbody className="divide-y divide-slate-100">
                         {inv.lines.length === 0 && (
                           <tr>
                             <td colSpan={7} className="px-4 py-10 text-center text-slate-500">
@@ -549,8 +550,9 @@ export function ReceiveLoadForm({ onSaved, cancelHref }: { onSaved: (id: string)
                             </tr>
                           );
                         })}
-                      </tbody>
+                      </SortTbody>
                     </table>
+                    </SortScope>
                   </StackBox>
                 </div>
                 <div className="flex flex-col gap-3 border-t border-slate-100 p-4 sm:flex-row sm:items-center">
@@ -630,7 +632,7 @@ export function ReceiveLoadForm({ onSaved, cancelHref }: { onSaved: (id: string)
 
         {/* Narrower screens: keep the total and Save in view at the bottom */}
         <div
-          className="sticky bottom-0 z-20 -mx-4 flex items-center gap-3 border-t border-slate-200 bg-white/95 px-4 py-3 shadow-[0_-4px_12px_rgba(15,23,42,0.06)] backdrop-blur sm:-mx-5 sm:px-5 lg:-mx-6 lg:px-6 min-[1360px]:hidden"
+          className="sticky bottom-0 z-20 -mx-4 flex items-center gap-3 border-t border-slate-200 bg-white/95 px-4 py-3 shadow-[0_-4px_12px_rgba(15,23,42,0.06)] backdrop-blur sm:-mx-5 sm:px-5 lg:-mx-8 lg:px-8 min-[1360px]:hidden"
         >
           <div className="min-w-0 flex-1">
             <p className="text-xs text-slate-500">

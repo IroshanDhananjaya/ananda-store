@@ -135,6 +135,11 @@ export type Actions = {
   /** Move one received item to another of the order's invoices (it was saved on the wrong one). Not once it's in stock. */
   moveOrderLine: (id: string, lineId: string, invoiceId: string) => Result;
   /**
+   * Add items to one of a received order's invoices (e.g. a second invoice that came later). Works while
+   * other items are in stock: the new ones are added to stock from the order page as usual.
+   */
+  addOrderInvoiceItems: (id: string, invoiceId: string, lines: OrderLineInput[]) => Result;
+  /**
    * Adds received quantities to stock, all at once or a few items at a time: `locationByLine` maps
    * OrderItem.id -> location number for the items to add now. `priceByLine` maps OrderItem.id -> price
    * on the invoice (lines left out keep theirs). The bill total follows.
@@ -249,6 +254,7 @@ export const ACTION_NAMES = [
   "saveOrderInvoice",
   "receiveOrder",
   "moveOrderLine",
+  "addOrderInvoiceItems",
   "postOrderToStock",
   "reverseOrderPosting",
   "receiveLoad",
@@ -1086,6 +1092,34 @@ export const createCore =
       // Each invoice has its own discount %, so the bill total follows
       const nextItems = orderItems.map((l) => (l.id === lineId ? { ...l, invoiceId } : l));
       set({ orderItems: nextItems, orders: orders.map((o) => (o.id === id ? totalled(o, orderInvoices, nextItems) : o)) });
+      return ok(id);
+    },
+    addOrderInvoiceItems: (id, invoiceId, input) => {
+      const { orders, orderInvoices, orderItems, items } = get();
+      const order = orders.find((o) => o.id === id);
+      if (!order) return fail("Order not found.");
+      if (!order.receivedDate) return fail(`${order.orderId} isn't received yet. Add the items with Edit, or receive the order first.`);
+      if (!orderInvoices.some((i) => i.id === invoiceId && i.orderId === order.orderId)) return fail("That invoice isn't on this order any more. Reload the page.");
+      if (!Array.isArray(input) || input.length === 0) return fail("Add at least one item.");
+      const current = orderItems.filter((l) => l.orderId === order.orderId);
+      const seen = new Set<string>();
+      const added: OrderItem[] = [];
+      for (const l of input) {
+        if (current.some((c) => c.itemCode === l.itemCode))
+          return fail(`${l.itemCode} is already on ${order.orderId}. Change its invoice in the Order items table, or with Edit receiving.`);
+        if (seen.has(l.itemCode)) return fail(`${l.itemCode} is added more than once.`);
+        seen.add(l.itemCode);
+        const invoicedQty = l.invoicedQty ?? 0;
+        if (!isWholeNumber(invoicedQty) || invoicedQty === 0) return fail(`Enter the qty on the invoice for ${l.itemCode}.`);
+        const line: OrderItem = { ...cleanLine(l), invoiceId, invoicedQty, orderId: order.orderId, id: newId() };
+        const err = validateLine(line, items);
+        if (err) return fail(err);
+        added.push(line);
+      }
+      const nextItems = [...orderItems, ...added];
+      // New items to put in stock: the order isn't all in stock any more
+      const postedToStock = order.postedToStock && added.every((l) => l.receivedQty <= 0);
+      set({ orderItems: nextItems, orders: orders.map((o) => (o.id === id ? { ...totalled(o, orderInvoices, nextItems), postedToStock } : o)) });
       return ok(id);
     },
     postOrderToStock: (id, locationByLine, priceByLine = {}) => {

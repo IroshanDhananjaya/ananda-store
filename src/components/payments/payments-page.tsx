@@ -11,7 +11,7 @@ import { DateRangePicker, inDateRange, type DateRange } from "@/components/ui/da
 import { Select } from "@/components/ui/form";
 import { Card, ClearFilters, FilterTabs, PageHeader, SearchInput, TableFooter, Toolbar } from "@/components/ui/layout";
 import { Pagination, usePagination } from "@/components/ui/pagination";
-import { EmptyRow, RowActions, Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
+import { EmptyRow, RowActions, Table, TBody, TD, TH, THead, TR, useRowSort } from "@/components/ui/table";
 import { useAppStore, useRouteMap, useShopMap } from "@/lib/store";
 import { OPENING_BILL, PAYMENT_METHODS, type Payment, type PaymentMethod } from "@/lib/types";
 import { useDialog } from "@/lib/use-dialog";
@@ -52,7 +52,21 @@ export function PaymentsPage() {
   const total = rows.filter(isPaid).reduce((sum, p) => sum + p.amount, 0);
   const pending = rows.filter((p) => !isPaid(p)).reduce((sum, p) => sum + p.amount, 0);
 
-  const pager = usePagination(rows, [query, routeId, method, range]);
+  // A column header sorts every payment (not just this page)
+  const sorter = useRowSort(rows, {
+    receipt: (p) => p.receiptNo,
+    date: (p) => p.date,
+    store: (p) => shopMap.get(p.shopId)?.shopName ?? "Deleted store",
+    method: (p) => p.method,
+    cheque: (p) => (p.method === "Cheque" ? p.chequeNumber : null),
+    bills: (p) => {
+      const a = p.allocations[0];
+      if (!a) return "Not linked (advance)";
+      return a.saleId === OPENING_BILL ? "Opening balance" : (saleNoById.get(a.saleId) ?? "Deleted bill");
+    },
+    amount: (p) => p.amount,
+  });
+  const pager = usePagination(sorter.rows, [query, routeId, method, range, sorter.key]);
 
   return (
     <>
@@ -101,14 +115,16 @@ export function PaymentsPage() {
         <Table>
           <THead>
             <tr>
-              <TH>Receipt No.</TH>
-              <TH>Date</TH>
-              <TH>Store</TH>
+              <TH sort={sorter.column("receipt")}>Receipt No.</TH>
+              <TH sort={sorter.column("date")}>Date</TH>
+              <TH sort={sorter.column("store")}>Store</TH>
 
-              <TH>Method</TH>
-              <TH>Cheque No. / Date</TH>
-              <TH>For Bills</TH>
-              <TH className="text-right">Amount</TH>
+              <TH sort={sorter.column("method")}>Method</TH>
+              <TH sort={sorter.column("cheque")}>Cheque No. / Date</TH>
+              <TH sort={sorter.column("bills")}>For Bills</TH>
+              <TH className="text-right" sort={sorter.column("amount")}>
+                Amount
+              </TH>
               <TH className="w-24">
                 <span className="sr-only">Actions</span>
               </TH>

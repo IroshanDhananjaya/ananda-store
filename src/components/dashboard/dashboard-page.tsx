@@ -5,7 +5,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { DueDateLabel, OrderStatusBadge } from "@/components/ui/badge";
 import { buttonClass } from "@/components/ui/button";
-import { Card, CardHeader, PageHeader } from "@/components/ui/layout";
+import { Card, CardHeader, Figure, PageHeader } from "@/components/ui/layout";
 import { EmptyRow, Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { isPaid } from "@/lib/ledger";
 import { profitFor } from "@/lib/profit";
@@ -29,8 +29,9 @@ import {
   todayISO,
 } from "@/lib/utils";
 
-function SectionLabel({ children }: { children: ReactNode }) {
-  return <h2 className="mb-3 text-xs font-medium text-slate-500">{children}</h2>;
+/** `onBand`: the first label sits on the page header's blue band */
+function SectionLabel({ children, onBand }: { children: ReactNode; onBand?: boolean }) {
+  return <h2 className={cn("mb-3 text-[13px] font-medium", onBand ? "text-white/80" : "text-slate-500")}>{children}</h2>;
 }
 
 function CardLink({ href, children }: { href: string; children: ReactNode }) {
@@ -60,19 +61,19 @@ function StatCard({
     amber: "bg-amber-50 text-amber-700",
     blue: "bg-sky-50 text-sky-700",
     red: "bg-red-50 text-red-700",
-    green: "bg-brand-50 text-brand-700",
+    green: "bg-emerald-50 text-emerald-700",
   };
   return (
     <Link
       href={href}
-      className="group flex flex-col gap-3 rounded-lg border border-slate-200 bg-white p-5 shadow-sm transition-shadow hover:shadow-md"
+      className="group @container flex min-w-0 flex-col gap-2 rounded-2xl bg-white p-5 shadow-card ring-1 ring-transparent transition-[box-shadow] hover:ring-slate-200"
     >
-      <div className="flex items-center justify-between">
-        <span className="text-sm font-medium text-slate-500">{label}</span>
-        <span className={cn("grid size-9 place-items-center rounded-lg [&_svg]:size-4.5", tones[tone])}>{icon}</span>
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-[13px] text-slate-500">{label}</span>
+        <span className={cn("grid size-7 place-items-center rounded-md [&_svg]:size-4", tones[tone])}>{icon}</span>
       </div>
-      <span className="text-3xl font-semibold tracking-tight text-slate-900 tabular-nums">{value}</span>
-      <span className="text-xs text-slate-500">{sub}</span>
+      <Figure className="text-slate-900">{value}</Figure>
+      <span className="text-[13px] text-slate-500">{sub}</span>
     </Link>
   );
 }
@@ -152,11 +153,11 @@ export function DashboardPage() {
         }
       />
 
-      <SectionLabel>Store orders & collections</SectionLabel>
+      <SectionLabel onBand>Store orders & collections</SectionLabel>
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard
           label="Cash balance due"
-          value={<span className="text-2xl">{formatMoney(outstanding)}</span>}
+          value={<span>{formatMoney(outstanding)}</span>}
           sub={`To collect from ${owingCount} store${owingCount === 1 ? "" : "s"}`}
           icon={<Wallet />}
           href="/stores"
@@ -164,7 +165,7 @@ export function DashboardPage() {
         />
         <StatCard
           label="Overdue"
-          value={<span className="text-2xl">{formatMoney(overdueTotal)}</span>}
+          value={<span>{formatMoney(overdueTotal)}</span>}
           sub={`${overdueBills} bill${overdueBills === 1 ? "" : "s"} past the end date`}
           icon={<ShieldAlert />}
           href="/invoices?filter=overdue"
@@ -172,7 +173,7 @@ export function DashboardPage() {
         />
         <StatCard
           label="Net profit this month"
-          value={<span className={cn("text-2xl", monthProfit.net < 0 && "text-red-600")}>{monthProfit.net < 0 ? `− ${formatMoney(-monthProfit.net)}` : formatMoney(monthProfit.net)}</span>}
+          value={<span className={cn(monthProfit.net < 0 && "text-red-600")}>{monthProfit.net < 0 ? `− ${formatMoney(-monthProfit.net)}` : formatMoney(monthProfit.net)}</span>}
           sub={`Gross ${formatMoney(monthProfit.gross)} − expenses ${formatMoney(monthProfit.expenses)}`}
           icon={<TrendingUp />}
           href="/profit"
@@ -180,7 +181,7 @@ export function DashboardPage() {
         />
         <StatCard
           label="Collected this month"
-          value={<span className="text-2xl">{formatMoney(monthCollected)}</span>}
+          value={<span>{formatMoney(monthCollected)}</span>}
           sub="All payments received"
           icon={<HandCoins />}
           href="/payments"
@@ -267,7 +268,7 @@ export function DashboardPage() {
         <StatCard label="Unmatched items" value={unmatched.length} sub="Received qty ≠ ordered qty" icon={<AlertTriangle />} href="/order-items" tone="red" />
         <StatCard
           label="Stock value"
-          value={<span className="text-2xl">{formatMoney(stockValue)}</span>}
+          value={<span>{formatMoney(stockValue)}</span>}
           sub={`${formatQty(stockUnits)} units on hand · wholesale`}
           icon={<Coins />}
           href="/stock"

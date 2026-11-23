@@ -416,7 +416,7 @@ export function OrderSheet({
       {printCheck && <ReceiveCheckSheet orderRef={orderRef} orderDate={orderDate} requiredDate={requiredDate} lines={orderLines} />}
 
       {/* Stays at the bottom of the screen while scrolling the sheet */}
-      <div className="sticky bottom-0 z-20 -mx-4 border-t border-slate-200 bg-white/95 px-4 py-3 shadow-[0_-4px_12px_-6px_rgb(15_23_42/0.15)] backdrop-blur sm:-mx-5 sm:px-5 lg:-mx-6 lg:px-6 print:hidden">
+      <div className="sticky bottom-0 z-20 -mx-4 border-t border-slate-200 bg-white/95 px-4 py-3 shadow-[0_-4px_12px_-6px_rgb(15_23_42/0.15)] backdrop-blur sm:-mx-5 sm:px-5 lg:-mx-8 lg:px-8 print:hidden">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
           <div className="min-w-0 flex-1 text-sm">
             {error ? (

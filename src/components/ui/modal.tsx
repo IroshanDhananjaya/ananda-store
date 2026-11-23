@@ -102,7 +102,7 @@ export function Modal({
   return (
     <div className={cn("fixed inset-0 z-50 flex items-end justify-center p-0 sm:items-center", size !== "full" && "sm:p-4")}>
       {/* A stray tap here only closes a dialog nothing was typed into */}
-      <div className="absolute inset-0 bg-slate-900/40" onClick={() => !dirty.current && onCloseRef.current()} aria-hidden />
+      <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-[2px]" onClick={() => !dirty.current && onCloseRef.current()} aria-hidden />
       <div
         ref={panelRef}
         role="dialog"
@@ -113,29 +113,29 @@ export function Modal({
         onChange={() => (dirty.current = true)}
         onKeyDown={keepFocusInside}
         className={cn(
-          "relative flex max-h-[92dvh] w-full flex-col rounded-t-xl border border-slate-200 bg-white shadow-[0_16px_48px_-12px_rgb(0_0_0/0.25)] outline-none sm:rounded-xl",
+          "relative flex max-h-[92dvh] w-full flex-col rounded-t-2xl border border-slate-200/80 bg-white shadow-float outline-none sm:rounded-2xl",
           widths[size],
         )}
       >
-        <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-3.5">
-          <div>
-            <h2 id={titleId} className="text-[15px] font-semibold text-slate-900">
+        <div className="flex items-start justify-between gap-4 border-b border-slate-200/80 px-6 py-4">
+          <div className="min-w-0">
+            <h2 id={titleId} className="text-[17px] font-semibold tracking-tight text-slate-900">
               {title}
             </h2>
-            {description && <p className="mt-0.5 text-[13px] text-slate-500">{description}</p>}
+            {description && <p className="mt-1 text-[13px] text-slate-500">{description}</p>}
           </div>
           <button
             type="button"
             onClick={tryClose}
-            className="-m-1 rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600 pointer-coarse:-m-2 pointer-coarse:p-2.5"
+            className="-m-1.5 rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 pointer-coarse:-m-2 pointer-coarse:p-2.5"
             aria-label="Close"
           >
             <X className="size-4" />
           </button>
         </div>
-        <div className="flex-1 overflow-y-auto px-5 py-4">{children}</div>
+        <div className="flex-1 overflow-y-auto px-6 py-5">{children}</div>
         {footer && (
-          <div className="flex flex-col-reverse gap-2 border-t border-slate-200 px-5 py-3 sm:flex-row sm:justify-end">
+          <div className="flex flex-col-reverse gap-2 rounded-b-2xl border-t border-slate-200/80 bg-slate-50/70 px-6 py-3.5 sm:flex-row sm:justify-end">
             {footer}
           </div>
         )}

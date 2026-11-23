@@ -9,6 +9,7 @@ import { orderSuggestions, type OrderSuggestion, type SuggestionReason } from "@
 import { useAppStore, useItemMap, useLastInvoicePrices } from "@/lib/store";
 import { cn, formatDate, formatMoney, formatQty, LOW_STOCK_LEVEL, round2, todayISO } from "@/lib/utils";
 
+import { SortScope, SortTbody, SortTh } from "@/components/ui/table";
 const LOOKBACK = [14, 30, 60, 90];
 const COVER = [7, 14, 21, 30];
 type Show = "suggested" | "all";
@@ -155,30 +156,31 @@ export function OrderSuggestions({
           )}
 
           <div className="max-h-[28rem] overflow-auto border-t border-slate-200">
+            <SortScope>
             <table className="w-full text-sm">
               <thead className="sticky top-0 z-10 bg-slate-50 text-left text-xs font-medium text-slate-500">
                 <tr>
-                  <th className="px-4 py-2 sm:pl-6">Item</th>
-                  <th className="px-3 py-2 text-right" title={`Units on bills dated in the last ${lookbackDays} days, delivered or not`}>
+                  <SortTh className="px-4 py-2 sm:pl-6">Item</SortTh>
+                  <SortTh className="px-3 py-2 text-right" title={`Units on bills dated in the last ${lookbackDays} days, delivered or not`}>
                     Sold {lookbackDays}d
-                  </th>
-                  <th className="px-3 py-2 text-right" title="Bills not delivered yet: to load (still in the store) + on the lorry">
+                  </SortTh>
+                  <SortTh className="px-3 py-2 text-right" title="Bills not delivered yet: to load (still in the store) + on the lorry">
                     To deliver
-                  </th>
-                  <th className="px-3 py-2 text-right">In stock</th>
-                  <th className="px-3 py-2 text-right" title="On purchase orders not received yet">
+                  </SortTh>
+                  <SortTh className="px-3 py-2 text-right">In stock</SortTh>
+                  <SortTh className="px-3 py-2 text-right" title="On purchase orders not received yet">
                     On order
-                  </th>
-                  <th className="px-3 py-2 text-right" title="How long the stock lasts at this rate, after the bills to load">
+                  </SortTh>
+                  <SortTh className="px-3 py-2 text-right" title="How long the stock lasts at this rate, after the bills to load">
                     Lasts
-                  </th>
-                  <th className="px-3 py-2 text-right" title={`Bills to load + ${coverDays} days of sales − stock − on order`}>
+                  </SortTh>
+                  <SortTh className="px-3 py-2 text-right" title={`Bills to load + ${coverDays} days of sales − stock − on order`}>
                     Suggest
-                  </th>
-                  <th className="px-3 py-2 text-right sm:pr-6">On sheet</th>
+                  </SortTh>
+                  <SortTh className="px-3 py-2 text-right sm:pr-6">On sheet</SortTh>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
+              <SortTbody className="divide-y divide-slate-100">
                 {rows.length === 0 && (
                   <tr>
                     <td colSpan={8} className="px-4 py-10 text-center text-slate-500">
@@ -236,8 +238,9 @@ export function OrderSuggestions({
                     </tr>
                   );
                 })}
-              </tbody>
+              </SortTbody>
             </table>
+            </SortScope>
           </div>
           <p className="border-t border-slate-200 px-4 py-2 text-xs text-slate-500 sm:px-6">
             Suggest = bills still to load + {coverDays} days of sales at the last {lookbackDays} days&apos; rate (units reduced for no stock count as sold) − stock

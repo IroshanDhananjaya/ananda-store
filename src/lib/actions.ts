@@ -4,7 +4,7 @@ import { cookies } from "next/headers";
 import { getDb } from "@/db";
 import { applyAction, fetchData, type ActionResponse } from "@/db/repo";
 import { ACTION_NAMES, fail, type ActionName, type Data } from "./core";
-import { RAIGAM_ITEMS_BATCH, type RaigamBill, type RaigamLine } from "./raigam";
+import { RAIGAM_ITEMS_BATCH, RAIGAM_MAX_DAYS, type RaigamBill, type RaigamLine } from "./raigam";
 import { listRaigamBills, RaigamError, readRaigamLines } from "./raigam-sfa";
 import { createSupabase } from "./supabase";
 import type { Result } from "./types";
@@ -105,9 +105,6 @@ export async function runAction(name: ActionName, args: unknown[], today: string
 }
 
 // ---------- Sync from Raigam: reading only; saving goes through runAction("syncRaigamBills") ----------
-
-/** Longest date range read at once */
-const RAIGAM_MAX_DAYS = 92;
 
 const isISODate = (v: unknown): v is string => typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v);
 

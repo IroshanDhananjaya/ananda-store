@@ -7,6 +7,8 @@ const nextConfig: NextConfig = {
   experimental: {
     agentUpgrade: "security",
   },
+  // The Next.js dev badge (development only) would sit over the sidebar at the bottom left
+  devIndicators: { position: "bottom-right" },
   turbopack: {
     rules: {
       "*.css": {

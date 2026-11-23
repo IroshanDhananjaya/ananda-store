@@ -2,6 +2,9 @@
 
 import { useLayoutEffect, useRef, type ComponentProps, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
+import { SortScope, SortTbody, SortTh, sortSkip, useTableSorted } from "./table-sort";
+
+export { SortScope, SortTbody, SortTh, useRowSort, type ColumnSort } from "./table-sort";
 
 /**
  * Wraps a table so that on phones each row shows as a card of "column name: value" lines
@@ -46,50 +49,55 @@ export function Table({ className, children }: { className?: string; children: R
   // scroll box; otherwise they widen the whole page on small screens.
   return (
     <StackBox className={cn("relative overflow-x-auto", className)}>
-      <table className="w-full border-collapse text-[13px]">{children}</table>
+      {/* Every column with a heading sorts on a click */}
+      <SortScope>
+        <table className="w-full border-collapse text-[13.5px]">{children}</table>
+      </SortScope>
     </StackBox>
   );
 }
 
 export function THead({ children }: { children: ReactNode }) {
   return (
-    <thead className="border-b border-slate-200 bg-slate-50 text-left text-xs font-medium text-slate-500">
+    <thead className="border-b border-slate-100 bg-white text-left text-xs font-medium text-slate-500">
       {children}
     </thead>
   );
 }
 
-export function TH({ className, ...props }: ComponentProps<"th">) {
-  return <th className={cn("px-3 py-2 font-medium whitespace-nowrap first:pl-4 last:pr-4", className)} {...props} />;
+export function TH({ className, ...props }: ComponentProps<typeof SortTh>) {
+  return <SortTh className={cn("px-3 py-3 font-medium whitespace-nowrap first:pl-5 last:pr-5", className)} {...props} />;
 }
 
 export function TBody({ children }: { children: ReactNode }) {
-  return <tbody className="divide-y divide-slate-100 bg-white">{children}</tbody>;
+  return <SortTbody className="divide-y divide-slate-100 bg-white">{children}</SortTbody>;
 }
 
 export function TR({ className, ...props }: ComponentProps<"tr">) {
-  return <tr className={cn("transition-colors hover:bg-slate-50", className)} {...props} />;
+  return <tr className={cn("transition-colors hover:bg-slate-50/80", className)} {...props} />;
 }
 
 export function TD({ className, ...props }: ComponentProps<"td">) {
-  return <td className={cn("px-3 py-2 whitespace-nowrap text-slate-700 first:pl-4 last:pr-4", className)} {...props} />;
+  return <td className={cn("px-3 py-3 whitespace-nowrap text-slate-700 first:pl-5 last:pr-5", className)} {...props} />;
 }
 
-/** A heading row inside a table body, e.g. the item category the rows below are under */
-export function GroupRow({ colSpan, className, children }: { colSpan: number; className?: string; children: ReactNode }) {
+/** A heading row inside a table body, e.g. the item category the rows below are under (hidden while the table is sorted) */
+export const GroupRow = sortSkip(function GroupRow({ colSpan, className, children }: { colSpan: number; className?: string; children: ReactNode }) {
+  const sorted = useTableSorted();
+  if (sorted) return null;
   return (
     <tr className={cn("bg-slate-50", className)}>
-      <td colSpan={colSpan} className="px-4 py-1.5 text-xs font-medium text-slate-600">
+      <td colSpan={colSpan} className="px-5 py-2 text-xs font-medium text-slate-600">
         {children}
       </td>
     </tr>
   );
-}
+});
 
 export function EmptyRow({ colSpan, children }: { colSpan: number; children: ReactNode }) {
   return (
     <tr>
-      <td colSpan={colSpan} className="px-4 py-12 text-center text-sm text-slate-500">
+      <td colSpan={colSpan} className="px-5 py-14 text-center text-sm text-slate-500">
         {children}
       </td>
     </tr>

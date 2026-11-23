@@ -16,12 +16,12 @@ import { useAppStore, useItemMap } from "@/lib/store";
 import type { OrderInvoice } from "@/lib/types";
 import { useDialog } from "@/lib/use-dialog";
 import { cn, formatDate, formatMoney, daysUntil, formatQty, invoiceTotals, lineStatus, orderLineValue, orderStatus, paidByInvoice, raigamChequeDate, raigamPayments, round2 } from "@/lib/utils";
-import { invoiceName, OrderInvoiceDialog, PostToStockDialog, ReceiveOrderDialog } from "./order-dialogs";
+import { AddInvoiceItemsDialog, invoiceName, OrderInvoiceDialog, PostToStockDialog, ReceiveOrderDialog } from "./order-dialogs";
 import { ChequeDepositDate, ChequeDepositPanel, OrderPaymentDetails, OrderPaymentSummary, PayOrderDialog } from "./order-payment";
 import { OrderNotFound } from "./order-pages";
 import { ReceiveCheckSheet } from "./receive-check-sheet";
 
-type Dialog = "receive" | "post" | "reverse" | "delete" | "pay" | "invoice";
+type Dialog = "receive" | "post" | "reverse" | "delete" | "pay" | "invoice" | "items";
 /** Items shown: all, one invoice's, the missing ones, or the ones that came without being ordered */
 type ItemFilter = "all" | "missing" | "extra" | `inv:${string}`;
 
@@ -67,6 +67,8 @@ export function OrderDetail({ id }: { id: string }) {
   // The invoice being paid on its own (null = the whole order with one payment)
   const [payInvoice, setPayInvoice] = useState<OrderInvoice | null>(null);
   const [postOnly, setPostOnly] = useState<string[]>();
+  // The invoice new items go on ("" = the first)
+  const [itemsTo, setItemsTo] = useState("");
   const [show, setShow] = useState<ItemFilter>("all");
 
   const lines = useMemo(() => orderItems.filter((l) => l.orderId === order?.orderId), [orderItems, order?.orderId]);
@@ -119,6 +121,11 @@ export function OrderDetail({ id }: { id: string }) {
   function openInvoice(invoice: OrderInvoice | null) {
     setInvoiceTarget(invoice);
     dialog.open("invoice");
+  }
+
+  function openItems(invoiceId: string) {
+    setItemsTo(invoiceId);
+    dialog.open("items");
   }
 
   async function moveLine(lineId: string, itemCode: string, invoiceId: string) {
@@ -328,8 +335,8 @@ export function OrderDetail({ id }: { id: string }) {
                   <TH className="text-right">Grand Total</TH>
                   <TH>Payment</TH>
                   <TH>Deposit</TH>
-                  <TH className="w-12">
-                    <span className="sr-only">Edit</span>
+                  <TH className="w-24">
+                    <span className="sr-only">Add items, edit</span>
                   </TH>
                 </tr>
               </THead>
@@ -384,7 +391,18 @@ export function OrderDetail({ id }: { id: string }) {
                         <span className="text-slate-400">—</span>
                       )}
                     </TD>
-                    <TD onClick={(e) => e.stopPropagation()}>
+                    <TD onClick={(e) => e.stopPropagation()} className="whitespace-nowrap">
+                      {received && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => openItems(invoice.id)}
+                          aria-label={`Add items to ${invoiceName(invoice, n)}`}
+                          title="Add items to this invoice"
+                        >
+                          <Plus />
+                        </Button>
+                      )}
                       <Button variant="ghost" size="icon" onClick={() => openInvoice(invoice)} aria-label={`Edit ${invoiceName(invoice, n)}`} title="Edit">
                         <Pencil />
                       </Button>
@@ -420,20 +438,27 @@ export function OrderDetail({ id }: { id: string }) {
                 .join(" · ")}
               actions={
                 received && (
-                  <FilterTabs<ItemFilter>
-                    value={show}
-                    onChange={setShow}
-                    options={[
-                      { value: "all", label: "All", count: lines.length },
-                      ...perInvoice.map(({ invoice, n, lines: on }) => ({
-                        value: `inv:${invoice.id}` as const,
-                        label: invoice.invoiceNumber || `Invoice ${n + 1}`,
-                        count: on.length,
-                      })),
-                      ...(missing.length ? [{ value: "missing" as const, label: "Missing", count: missing.length }] : []),
-                      ...(extra.length ? [{ value: "extra" as const, label: "Not ordered", count: extra.length }] : []),
-                    ]}
-                  />
+                  <div className="flex flex-wrap items-center gap-2">
+                    <FilterTabs<ItemFilter>
+                      value={show}
+                      onChange={setShow}
+                      options={[
+                        { value: "all", label: "All", count: lines.length },
+                        ...perInvoice.map(({ invoice, n, lines: on }) => ({
+                          value: `inv:${invoice.id}` as const,
+                          label: invoice.invoiceNumber || `Invoice ${n + 1}`,
+                          count: on.length,
+                        })),
+                        ...(missing.length ? [{ value: "missing" as const, label: "Missing", count: missing.length }] : []),
+                        ...(extra.length ? [{ value: "extra" as const, label: "Not ordered", count: extra.length }] : []),
+                      ]}
+                    />
+                    {invoices.length > 0 && (
+                      <Button variant="secondary" size="sm" onClick={() => openItems(show.startsWith("inv:") ? show.slice(4) : "")}>
+                        <Plus /> Add items
+                      </Button>
+                    )}
+                  </div>
                 )
               }
             />
@@ -544,6 +569,7 @@ export function OrderDetail({ id }: { id: string }) {
         onClose={dialog.close}
       />
       <OrderInvoiceDialog order={order} invoice={invoiceTarget} lines={lines} open={dialog.target === "invoice"} onClose={dialog.close} />
+      <AddInvoiceItemsDialog order={order} invoiceId={itemsTo} lines={lines} open={dialog.target === "items"} onClose={dialog.close} />
       <PostToStockDialog order={order} lines={lines} only={postOnly} open={dialog.target === "post"} onClose={dialog.close} />
 
       <ConfirmDialog

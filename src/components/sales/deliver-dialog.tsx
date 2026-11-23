@@ -8,7 +8,7 @@ import { ChequeStatusField } from "@/components/payments/cheque-status-field";
 import { Field, Input, ReadOnlyValue, Textarea, toNumber } from "@/components/ui/form";
 import { FilterTabs } from "@/components/ui/layout";
 import { Modal } from "@/components/ui/modal";
-import { StackBox } from "@/components/ui/table";
+import { SortScope, SortTbody, SortTh, StackBox } from "@/components/ui/table";
 import { autoAllocate, openBills, type OpenBill } from "@/lib/ledger";
 import { useAppStore, useItemMap, useSaleDues } from "@/lib/store";
 import { PAYMENT_METHODS, type PaymentMethod, type Sale } from "@/lib/types";
@@ -417,15 +417,16 @@ function DeliverForm({ sale, onDone }: { sale: Sale; onDone: () => void }) {
           </div>
           <div className="overflow-hidden rounded-lg border border-slate-200">
             <StackBox>
+              <SortScope>
               <table className="w-full text-sm">
                 <thead className="bg-slate-50 text-left text-xs font-medium text-slate-500">
                   <tr>
-                    <th className="px-3 py-2">Bill</th>
-                    <th className="px-3 py-2 text-right">To pay</th>
-                    <th className="w-36 px-3 py-2 text-right">Paid now</th>
+                    <SortTh className="px-3 py-2">Bill</SortTh>
+                    <SortTh className="px-3 py-2 text-right">To pay</SortTh>
+                    <SortTh className="w-36 px-3 py-2 text-right">Paid now</SortTh>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100">
+                <SortTbody className="divide-y divide-slate-100">
                   {bills.map((b) => (
                     <tr key={b.id} className={b.id === sale.id ? "bg-brand-50/50" : ""}>
                       <td className="px-3 py-2">
@@ -458,8 +459,9 @@ function DeliverForm({ sale, onDone }: { sale: Sale; onDone: () => void }) {
                       </td>
                     </tr>
                   ))}
-                </tbody>
+                </SortTbody>
               </table>
+              </SortScope>
             </StackBox>
             {unlinked > 0.004 && (
               <p className="border-t border-slate-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">

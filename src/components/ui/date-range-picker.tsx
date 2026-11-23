@@ -52,8 +52,26 @@ function shiftDay(iso: string, n: number) {
   return isoOf(y, m, Math.min(Number(iso.slice(8)), new Date(y, m + 1, 0).getDate()));
 }
 
-/** Two months side by side from Tailwind's sm width up, one on phones */
-const monthsShown = () => (window.matchMedia("(min-width: 40rem)").matches ? 2 : 1);
+/** Two months side by side when the screen has room for them (and the quick choices), else one */
+const monthsShown = () => (window.matchMedia("(min-width: 54rem)").matches ? 2 : 1);
+
+/** Days from one ISO date to another, both counted */
+const daysIn = (from: string, to: string) =>
+  Math.round((Date.UTC(+to.slice(0, 4), +to.slice(5, 7) - 1, +to.slice(8)) - Date.UTC(+from.slice(0, 4), +from.slice(5, 7) - 1, +from.slice(8))) / 86_400_000) + 1;
+
+/** One-click ranges, worked out from today */
+function presetsFor(today: string): { label: string; range: DateRange }[] {
+  const { y, m } = monthOf(today);
+  return [
+    { label: "Today", range: { from: today, to: today } },
+    { label: "Yesterday", range: { from: addDays(today, -1), to: addDays(today, -1) } },
+    { label: "Last 7 days", range: { from: addDays(today, -6), to: today } },
+    { label: "Last 30 days", range: { from: addDays(today, -29), to: today } },
+    { label: "This month", range: { from: isoOf(y, m, 1), to: today } },
+    { label: "Last month", range: { from: isoOf(y, m - 1, 1), to: isoOf(y, m, 0) } },
+    { label: "This year", range: { from: isoOf(y, 0, 1), to: today } },
+  ];
+}
 
 /**
  * From / to date filter (ISO dates) like Raigam SFA's: a box showing the dates that opens a
@@ -93,6 +111,8 @@ export function DateRangePicker({
   const [hover, setHover] = useState("");
   /** Day the arrow keys move from: the one day button in the tab order */
   const [focused, setFocused] = useState("");
+  /** Months side by side: 2 when the screen has room, set on opening */
+  const [shown, setShown] = useState(2);
 
   // Day first, as on every table and paper bill (not 2026-11-01)
   const text =
@@ -106,6 +126,7 @@ export function DateRangePicker({
     const now = todayISO();
     const start = value.from || value.to || now;
     setToday(now);
+    setShown(monthsShown());
     setView(monthOf(start));
     setFocused(start);
     setAnchor("");
@@ -184,8 +205,12 @@ export function DateRangePicker({
     }
   }
 
+  function choose(range: DateRange) {
+    onChange(range);
+    hide(true);
+  }
+
   function moveTo(day: string) {
-    const shown = monthsShown();
     const ahead = monthsBetween(view, monthOf(day));
     if (ahead < 0) setView(monthOf(day));
     else if (ahead >= shown) setView(addMonths(monthOf(day), 1 - shown));
@@ -211,7 +236,9 @@ export function DateRangePicker({
   const thisYear = Number(today.slice(0, 4));
   // The arrow-key day, or the 1st of the first month when that day is scrolled out of view
   const ahead = focused ? monthsBetween(view, monthOf(focused)) : -1;
-  const tabDay = ahead === 0 || ahead === 1 ? focused : isoOf(view.y, view.m, 1);
+  const tabDay = ahead >= 0 && ahead < shown ? focused : isoOf(view.y, view.m, 1);
+  const presets = today ? presetsFor(today) : [];
+  const activePreset = presets.find((p) => p.range.from === value.from && p.range.to === value.to)?.label;
 
   function renderMonth(i: number) {
     const month = addMonths(view, i);
@@ -220,25 +247,23 @@ export function DateRangePicker({
     const years = Array.from({ length: Math.max(thisYear + 1, month.y) - firstYear + 1 }, (_, n) => firstYear + n);
     // The second month's boxes move the first month too, so the two stay side by side
     const goTo = (m: Month) => setView(addMonths(m, -i));
+    const last = i === shown - 1;
 
     return (
-      <div key={i} className={cn(i === 1 && "hidden sm:block")}>
-        <div className={cn("mb-3 flex items-center gap-2", i === 1 && "justify-end")}>
-          {i === 0 && <NavButton dir="prev" onClick={() => setView(addMonths(view, -1))} />}
-          <MiniSelect
-            label="Month"
-            value={month.m}
-            options={MONTHS.map((name, m) => [m, name])}
-            onChange={(m) => goTo({ y: month.y, m })}
-          />
-          <MiniSelect label="Year" value={month.y} options={years.map((y) => [y, String(y)])} onChange={(y) => goTo({ y, m: month.m })} />
-          {i === 0 && <NavButton dir="next" onClick={() => setView(addMonths(view, 1))} className="ml-auto sm:hidden" />}
-          {i === 1 && <NavButton dir="next" onClick={() => setView(addMonths(view, 1))} className="ml-1" />}
+      // Fixed width: 7 columns of 40px, so days never squeeze into each other
+      <div key={i} className="w-[17.5rem] shrink-0">
+        <div className="mb-2 flex h-9 items-center gap-1">
+          {i === 0 ? <NavButton dir="prev" onClick={() => setView(addMonths(view, -1))} /> : <span className="size-8 shrink-0" />}
+          <div className="flex flex-1 items-center justify-center">
+            <MiniSelect label="Month" value={month.m} options={MONTHS.map((name, m) => [m, name])} onChange={(m) => goTo({ y: month.y, m })} />
+            <MiniSelect label="Year" value={month.y} options={years.map((y) => [y, String(y)])} onChange={(y) => goTo({ y, m: month.m })} />
+          </div>
+          {last ? <NavButton dir="next" onClick={() => setView(addMonths(view, 1))} /> : <span className="size-8 shrink-0" />}
         </div>
-        <div role="grid" aria-label={`${MONTHS[month.m]} ${month.y}`} onKeyDown={onGridKey} className="flex flex-col gap-0.5">
+        <div role="grid" aria-label={`${MONTHS[month.m]} ${month.y}`} onKeyDown={onGridKey}>
           <div role="row" className="grid grid-cols-7">
             {WEEKDAYS.map((d) => (
-              <div key={d} role="columnheader" className="grid h-8 place-items-center text-xs font-medium text-slate-500">
+              <div key={d} role="columnheader" className="grid h-8 place-items-center text-[11px] font-medium text-slate-400">
                 {d}
               </div>
             ))}
@@ -247,8 +272,8 @@ export function DateRangePicker({
             <div key={week[0]} role="row" className="grid grid-cols-7">
               {week.map((day, col) => {
                 const outside = !day.startsWith(key);
-                const inRange = !!lo && day >= lo && day <= hi;
-                const isEnd = inRange && !outside && (day === lo || day === hi);
+                const inRange = !!lo && day >= lo && day <= hi && !outside;
+                const isEnd = inRange && (day === lo || day === hi);
                 const band = inRange && lo !== hi;
                 return (
                   <div
@@ -256,35 +281,42 @@ export function DateRangePicker({
                     role="gridcell"
                     aria-selected={inRange}
                     className={cn(
-                      "size-10",
-                      band && (outside ? "bg-brand-50/50" : "bg-brand-50"),
-                      band && (day === lo || col === 0) && "rounded-l-lg",
-                      band && (day === hi || col === 6) && "rounded-r-lg",
+                      "relative grid h-10 place-items-center",
+                      // The light band joining the first and last day (rounded where a week or the range ends)
+                      band && "bg-brand-50",
+                      band && (day === lo || col === 0 || day.endsWith("-01")) && "rounded-l-full",
+                      band && (day === hi || col === 6 || addDays(day, 1).slice(0, 7) !== key) && "rounded-r-full",
                     )}
                   >
-                    <button
-                      type="button"
-                      tabIndex={!outside && day === tabDay ? 0 : -1}
-                      data-day={outside ? undefined : day}
-                      aria-label={longDate(day)}
-                      aria-current={day === today ? "date" : undefined}
-                      onClick={() => pick(day)}
-                      onMouseEnter={() => anchor && setHover(day)}
-                      className={cn(
-                        "size-10 rounded-lg text-sm tabular-nums transition-colors focus-visible:ring-2 focus-visible:ring-brand-500/50 focus-visible:outline-none",
-                        isEnd
-                          ? "bg-brand-600 font-semibold text-white hover:bg-brand-700"
-                          : outside
-                            ? "text-slate-400 hover:bg-slate-100"
+                    {outside ? (
+                      <span className="text-sm text-slate-300 tabular-nums" aria-hidden>
+                        {Number(day.slice(8))}
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        tabIndex={day === tabDay ? 0 : -1}
+                        data-day={day}
+                        aria-label={longDate(day)}
+                        aria-current={day === today ? "date" : undefined}
+                        onClick={() => pick(day)}
+                        onMouseEnter={() => anchor && setHover(day)}
+                        className={cn(
+                          "relative grid size-9 place-items-center rounded-full text-sm tabular-nums transition-colors",
+                          "focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-slate-400",
+                          isEnd
+                            ? "bg-brand-600 font-semibold text-white hover:bg-brand-700"
                             : inRange
                               ? "font-medium text-brand-900 hover:bg-brand-100"
-                              : day === today
-                                ? "bg-slate-100 font-semibold text-slate-900 hover:bg-slate-200"
-                                : "text-slate-800 hover:bg-slate-100",
-                      )}
-                    >
-                      {Number(day.slice(8))}
-                    </button>
+                              : "text-slate-700 hover:bg-slate-100",
+                          day === today && !isEnd && "font-semibold text-slate-900",
+                        )}
+                      >
+                        {Number(day.slice(8))}
+                        {/* Today: a small dot under the number */}
+                        {day === today && <span className={cn("absolute bottom-1 size-1 rounded-full", isEnd ? "bg-white" : "bg-accent-500")} aria-hidden />}
+                      </button>
+                    )}
                   </div>
                 );
               })}
@@ -307,13 +339,13 @@ export function DateRangePicker({
         aria-label={ariaLabel ? `${ariaLabel}: ${text}` : undefined}
         onClick={() => (open ? hide(false) : show())}
         className={cn(
-          "flex h-9 w-full items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 text-left text-sm whitespace-nowrap shadow-sm transition-colors hover:bg-slate-50",
-          "focus-visible:border-brand-500 focus-visible:ring-2 focus-visible:ring-brand-500/20 focus-visible:outline-none",
-          open && "border-brand-500 ring-2 ring-brand-500/20",
+          "flex h-9 w-full items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-left text-sm whitespace-nowrap shadow-[0_1px_2px_rgb(16_18_27/0.04)] transition-[border-color,box-shadow] hover:border-slate-300 pointer-coarse:h-11",
+          "focus-visible:border-brand-500 focus-visible:ring-4 focus-visible:ring-brand-500/15 focus-visible:outline-none",
+          open && "border-brand-500 ring-4 ring-brand-500/15",
           className,
         )}
       >
-        <CalendarDays className="size-4 shrink-0 text-slate-400" />
+        <CalendarDays className="size-4 shrink-0 text-slate-500" />
         <span className={cn("truncate tabular-nums", value.from || value.to ? "text-slate-900" : "text-slate-500")}>{text}</span>
       </button>
 
@@ -322,23 +354,63 @@ export function DateRangePicker({
           ref={panelRef}
           role="dialog"
           aria-label="Choose dates"
-          className="fixed z-[60] max-w-[calc(100vw-1rem)] rounded-lg border border-slate-200 bg-white shadow-xl"
+          className="fixed z-[60] max-h-[calc(100dvh-1rem)] max-w-[calc(100vw-1rem)] overflow-auto rounded-2xl border border-slate-200/80 bg-white shadow-raised"
         >
-          <div className="flex gap-8 p-4">{[0, 1].map(renderMonth)}</div>
-          <div className="flex min-h-13 items-center justify-between gap-3 border-t border-slate-200 px-4 py-2">
-            <p className="text-xs text-slate-500">{anchor ? "Now click the last day" : "Click the first day, then the last"}</p>
-            {clearable && (
+          <div className="flex flex-col sm:flex-row">
+            {/* Quick choices: a list beside the calendar, chips above it on a phone */}
+            <div className="flex flex-wrap gap-1.5 border-b border-slate-100 p-3 sm:w-40 sm:flex-col sm:flex-nowrap sm:gap-0.5 sm:border-r sm:border-b-0">
+              {presets.map((p) => (
+                <button
+                  key={p.label}
+                  type="button"
+                  onClick={() => choose(p.range)}
+                  className={cn(
+                    "rounded-lg px-3 py-1.5 text-left text-[13px] font-medium whitespace-nowrap transition-colors max-sm:border",
+                    "focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-slate-400",
+                    p.label === activePreset
+                      ? "bg-brand-600 text-white max-sm:border-brand-600"
+                      : "text-slate-600 hover:bg-slate-100 hover:text-slate-900 max-sm:border-slate-200",
+                  )}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+            <div className="flex gap-6 p-4">{Array.from({ length: shown }, (_, i) => renderMonth(i))}</div>
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 px-4 py-3">
+            <p className="text-[13px] text-slate-500">
+              {anchor ? (
+                "Now click the last day"
+              ) : lo ? (
+                <>
+                  <span className="font-medium text-slate-900 tabular-nums">{lo === hi ? formatDate(lo) : `${formatDate(lo)} – ${formatDate(hi)}`}</span>
+                  <span className="ml-1.5">
+                    · {daysIn(lo, hi)} day{daysIn(lo, hi) === 1 ? "" : "s"}
+                  </span>
+                </>
+              ) : (
+                "Click the first day, then the last"
+              )}
+            </p>
+            <div className="flex items-center gap-2">
+              {clearable && (
+                <button
+                  type="button"
+                  onClick={() => choose({ from: "", to: "" })}
+                  className="h-8 rounded-lg px-3 text-[13px] font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-slate-400"
+                >
+                  Clear
+                </button>
+              )}
               <button
                 type="button"
-                onClick={() => {
-                  onChange({ from: "", to: "" });
-                  hide(true);
-                }}
-                className="rounded-md px-3 py-1.5 text-sm font-medium text-slate-900 hover:bg-slate-100 focus-visible:ring-2 focus-visible:ring-brand-500/50 focus-visible:outline-none"
+                onClick={() => hide(true)}
+                className="h-8 rounded-lg bg-brand-600 px-4 text-[13px] font-medium text-white hover:bg-brand-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400"
               >
-                Clear
+                Done
               </button>
-            )}
+            </div>
           </div>
         </div>
       )}
@@ -354,7 +426,7 @@ function NavButton({ dir, onClick, className }: { dir: "prev" | "next"; onClick:
       onClick={onClick}
       aria-label={dir === "prev" ? "Previous month" : "Next month"}
       className={cn(
-        "grid size-8 shrink-0 place-items-center rounded-md text-slate-700 hover:bg-slate-100 focus-visible:ring-2 focus-visible:ring-brand-500/50 focus-visible:outline-none",
+        "grid size-8 shrink-0 place-items-center rounded-lg border border-slate-200 text-slate-600 transition-colors hover:bg-slate-50 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-slate-400",
         className,
       )}
     >
@@ -380,7 +452,7 @@ function MiniSelect({
         aria-label={label}
         value={value}
         onChange={(e) => onChange(Number(e.target.value))}
-        className="h-8 cursor-pointer appearance-none rounded-md border border-slate-200 bg-white pr-7 pl-2.5 text-sm font-medium text-slate-900 shadow-xs hover:bg-slate-50 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 focus:outline-none"
+        className="h-8 cursor-pointer appearance-none rounded-lg bg-transparent pr-6 pl-2 text-sm font-semibold text-slate-900 hover:bg-slate-100 focus-visible:outline-2 focus-visible:outline-slate-400"
       >
         {options.map(([v, name]) => (
           <option key={v} value={v}>
@@ -388,7 +460,7 @@ function MiniSelect({
           </option>
         ))}
       </select>
-      <ChevronDown className="pointer-events-none absolute top-1/2 right-2 size-3.5 -translate-y-1/2 text-slate-500" />
+      <ChevronDown className="pointer-events-none absolute top-1/2 right-1.5 size-3.5 -translate-y-1/2 text-slate-400" />
     </div>
   );
 }

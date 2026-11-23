@@ -8,7 +8,7 @@ import { Field, Input, ReadOnlyValue, Select, toNumber } from "@/components/ui/f
 import { ChequeStatusField } from "./cheque-status-field";
 import { FilterTabs } from "@/components/ui/layout";
 import { Modal } from "@/components/ui/modal";
-import { StackBox } from "@/components/ui/table";
+import { SortScope, SortTbody, SortTh, StackBox } from "@/components/ui/table";
 import { autoAllocate, openBills, type OpenBill } from "@/lib/ledger";
 import { useAppStore, useShopBalances } from "@/lib/store";
 import { PAYMENT_METHODS, type Payment, type PaymentMethod } from "@/lib/types";
@@ -205,15 +205,16 @@ function PaymentForm({
           ) : (
             <div className="overflow-hidden rounded-lg border border-slate-200">
               <StackBox>
+                <SortScope>
                 <table className="w-full text-sm">
                   <thead className="bg-slate-50 text-left text-xs font-medium text-slate-500">
                     <tr>
-                      <th className="px-3 py-2">Bill</th>
-                      <th className="px-3 py-2 text-right">Cash Balance</th>
-                      <th className="w-36 px-3 py-2 text-right">Pay now</th>
+                      <SortTh className="px-3 py-2">Bill</SortTh>
+                      <SortTh className="px-3 py-2 text-right">Cash Balance</SortTh>
+                      <SortTh className="w-36 px-3 py-2 text-right">Pay now</SortTh>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-100">
+                  <SortTbody className="divide-y divide-slate-100">
                     {bills.map((b) => (
                       <tr key={b.id}>
                         <td className="px-3 py-2">
@@ -242,8 +243,9 @@ function PaymentForm({
                         </td>
                       </tr>
                     ))}
-                  </tbody>
+                  </SortTbody>
                 </table>
+                </SortScope>
               </StackBox>
               <div className="flex flex-wrap justify-between gap-2 border-t border-slate-200 bg-slate-50/60 px-3 py-2 text-xs text-slate-600">
                 <span>

@@ -61,6 +61,10 @@ export type RaigamBill = {
   late: boolean;
   /** "Actual" on Raigam: delivered there (a bill here is still delivered here, with the cash collected) */
   delivered: boolean;
+  /** ISO date it was made Actual on Raigam ("" while it's a booking) */
+  actualDate: string;
+  /** Raigam's value of what was delivered (0 while it's a booking) */
+  actualTotal: number;
   discountPct: number;
   /** Raigam's invoice value, to check ours against */
   total: number;
@@ -90,6 +94,9 @@ export const NEW_STORE_CREDIT_DAYS = 21;
  * finish within the hosting's 10-second limit and the 1 MB a request may carry
  */
 export const RAIGAM_ITEMS_BATCH = 40;
+
+/** Longest date range read from Raigam in one request; the sync dialog reads a longer range in parts this long */
+export const RAIGAM_MAX_DAYS = 92;
 
 // ---------- Invoice numbers ----------
 
@@ -377,48 +384,60 @@ function billInput(
   creditDays: number,
   sale: Sale | undefined,
 ): SaleInput | string {
-  const lines = new Map<string, SaleLineInput>();
-  const returns = new Map<string, SaleReturnInput>();
+  // Raigam's lines for each item here (two Raigam items matched to one item here go on one line)
+  const parts = new Map<string, RaigamLine[]>();
+  const returnParts = new Map<string, { kind: SaleReturnInput["kind"]; sapCode: string; qty: number; unitPrice: number }[]>();
   for (const l of bill.lines) {
     const sapCode = itemOf(l.itemId);
     // Items taken off on Raigam stay on the bill (qty 0 if all of it), as on Raigam's bill;
     // a free item (only free issue, e.g. Coffee 50g free with Coffee 100g) is a line with qty 0
-    if (l.qty > 0 || l.freeQty > 0 || l.takenOff > 0) {
-      // Two Raigam items matched to one item here go on one line
-      const had = lines.get(sapCode);
-      if (had && (had.unitPrice !== l.unitPrice || had.discountPct !== l.discountPct))
-        return `Two Raigam items are matched to ${sapCode} at different prices. Check the item matches.`;
-      lines.set(
-        sapCode,
-        had
-          ? { ...had, qty: had.qty + l.qty, freeQty: had.freeQty + l.freeQty, takenOff: had.takenOff + l.takenOff }
-          : {
-              sapCode,
-              // An item already on the bill keeps its stock location
-              locationNumber: sale?.lines.find((x) => x.sapCode === sapCode)?.locationNumber ?? stockLocationFor(sapCode, data),
-              qty: l.qty,
-              freeQty: l.freeQty,
-              takenOff: l.takenOff,
-              unitPrice: l.unitPrice,
-              discountPct: l.discountPct,
-            },
-      );
-    }
+    if (l.qty > 0 || l.freeQty > 0 || l.takenOff > 0) parts.set(sapCode, [...(parts.get(sapCode) ?? []), l]);
     for (const [kind, qty, unitPrice] of [
       ["Good", l.goodQty, l.goodPrice],
       ["Market", l.marketQty, l.marketPrice],
     ] as const) {
       if (qty <= 0) continue;
       const key = `${kind}|${sapCode}`;
-      const had = returns.get(key);
-      if (had && had.unitPrice !== unitPrice) return `Two Raigam items are matched to ${sapCode} at different return prices. Check the item matches.`;
-      returns.set(key, had ? { ...had, qty: had.qty + qty } : { kind, sapCode, qty, unitPrice });
+      returnParts.set(key, [...(returnParts.get(key) ?? []), { kind, sapCode, qty, unitPrice }]);
     }
   }
-  if (lines.size === 0 && returns.size > 0)
+
+  const lines: SaleLineInput[] = [...parts].map(([sapCode, ps]) => {
+    const sum = (f: (p: RaigamLine) => number) => ps.reduce((n, p) => n + f(p), 0);
+    const qty = sum((p) => p.qty);
+    const line: SaleLineInput = {
+      sapCode,
+      // An item already on the bill keeps its stock location
+      locationNumber: sale?.lines.find((x) => x.sapCode === sapCode)?.locationNumber ?? stockLocationFor(sapCode, data),
+      qty,
+      freeQty: sum((p) => p.freeQty),
+      takenOff: sum((p) => p.takenOff),
+      unitPrice: ps[0].unitPrice,
+      discountPct: ps[0].discountPct,
+    };
+    const samePrice = ps.every((p) => p.unitPrice === ps[0].unitPrice && p.discountPct === ps[0].discountPct);
+    if (samePrice || qty === 0) return line;
+    // Same item at different prices on Raigam: one line here whose value is what Raigam charges for all of them
+    const sameDiscount = ps.every((p) => p.discountPct === ps[0].discountPct);
+    return {
+      ...line,
+      unitPrice: sameDiscount ? sum((p) => p.qty * p.unitPrice) / qty : sum((p) => p.qty * p.unitPrice * (1 - p.discountPct / 100)) / qty,
+      discountPct: sameDiscount ? ps[0].discountPct : 0,
+      note: `${MERGED_NOTE} ${ps
+        .filter((p) => p.qty > 0)
+        .map((p) => `${p.qty} × Rs. ${p.unitPrice.toFixed(2)}${p.discountPct > 0 ? ` (${p.discountPct}% off)` : ""}`)
+        .join(" + ")}`,
+    };
+  });
+  // A return item at two prices: one return line at the price that gives Raigam's value
+  const returns: SaleReturnInput[] = [...returnParts.values()].map((ps) => {
+    const qty = ps.reduce((n, p) => n + p.qty, 0);
+    return { kind: ps[0].kind, sapCode: ps[0].sapCode, qty, unitPrice: ps.reduce((n, p) => n + p.qty * p.unitPrice, 0) / qty };
+  });
+  if (lines.length === 0 && returns.length > 0)
     return "Only return items, nothing sold: a bill here needs an item sold. Add the returns to the store's next bill.";
-  if (lines.size === 0) return "No items on it on Raigam. Check Raigam again.";
-  const unplaced = [...lines.values()].find((l) => !l.locationNumber);
+  if (lines.length === 0) return "No items on it on Raigam. Check Raigam again.";
+  const unplaced = lines.find((l) => !l.locationNumber);
   if (unplaced) return `${unplaced.sapCode} has no stock location. Set it on the Items page.`;
   return {
     invoiceNo: bill.invoiceNo,
@@ -429,10 +448,13 @@ function billInput(
     // Set again when the bill is delivered (delivery date + the store's credit days)
     dueDate: sale && sale.dueDate >= bill.date ? sale.dueDate : addDays(bill.date, creditDays),
     notes: sale?.notes ?? "",
-    lines: [...lines.values()],
-    returns: [...returns.values()],
+    lines,
+    returns,
   };
 }
+
+/** Starts the note on a line that holds one item Raigam has on the bill at more than one price */
+const MERGED_NOTE = "On Raigam:";
 
 /** What a sync does with each bill. `picks` (from the sync dialog) go before items matched earlier. */
 export function planRaigamSync(data: SyncData, bills: RaigamBill[], picks: ItemPicks): SyncPlan {
@@ -470,6 +492,8 @@ export function planRaigamSync(data: SyncData, bills: RaigamBill[], picks: ItemP
     const subtotal = saleSubtotal(input);
     const total = round2(subtotal - billDiscount(subtotal, input.discountPercent));
     const differentTotal = Math.abs(total - bill.total) > 0.05 ? total : undefined;
+    const merged = input.lines.filter((l) => l.note?.startsWith(MERGED_NOTE)).map((l) => l.sapCode);
+    const mergedNote = merged.length ? ` · ${merged.join(", ")} at two prices on Raigam: put on one line, same value as Raigam` : "";
     if (!sale) {
       const status = allTakenOff(input)
         ? " · every item was taken off on Raigam, so Rs. 0"
@@ -478,7 +502,7 @@ export function planRaigamSync(data: SyncData, bills: RaigamBill[], picks: ItemP
           : bill.delivered
             ? " · delivered on Raigam, deliver it here too"
             : "";
-      return { bill, action: "add", input, late: bill.late, differentTotal, note: `New${status}` };
+      return { bill, action: "add", input, late: bill.late, differentTotal, note: `New${status}${mergedNote}` };
     }
 
     const changes = differences(sale, input);
@@ -494,7 +518,7 @@ export function planRaigamSync(data: SyncData, bills: RaigamBill[], picks: ItemP
       changes: changes.length ? detailChanges(sale, input) : undefined,
       note: `Changed on Raigam: ${[...changes, ...(late ? ["late delivery"] : [])].join(", ")}${
         changes.length && sale.checked ? ". Its Checked tick is cleared: check it again" : ""
-      }`,
+      }${changes.length ? mergedNote : ""}`,
     };
   });
 

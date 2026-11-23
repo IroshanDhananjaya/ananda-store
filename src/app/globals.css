@@ -7,17 +7,18 @@
 }
 
 @theme {
-  /* Accent: a calm indigo (buttons, links, focus, selection), Linear-style */
-  --color-brand-50: #f2f3fd;
-  --color-brand-100: #e5e7fb;
-  --color-brand-200: #cdd0f6;
-  --color-brand-300: #a9aeee;
-  --color-brand-400: #8189e2;
-  --color-brand-500: #6570d8;
-  --color-brand-600: #5e6ad2;
-  --color-brand-700: #4c56b8;
-  --color-brand-800: #3e4696;
-  --color-brand-900: #343a78;
+  /* Brand: the royal blue of the Ananda logo (buttons, links, the current page, the header band) */
+  --color-brand-50: #eef3ff;
+  --color-brand-100: #dce6ff;
+  --color-brand-200: #bfd1ff;
+  --color-brand-300: #93b1ff;
+  --color-brand-400: #5f88fb;
+  --color-brand-500: #3a63f0;
+  --color-brand-600: #2449d8;
+  --color-brand-700: #1c39b0;
+  --color-brand-800: #1b318b;
+  --color-brand-900: #1a2b6b;
+  --color-brand-950: #101a45;
 
   /* Greys: neutral (not blue-tinted), as in Linear. Every page's slate-* classes use these. */
   --color-slate-50: #f9f9fa;
@@ -43,13 +44,36 @@
   --color-accent-700: #c04502;
   --color-accent-800: #98370b;
   --color-accent-900: #7b300c;
+
+  /* Gold: the premium touch (the current page in the sidebar, highlights). Used sparingly. */
+  --color-gold-50: #fbf7ec;
+  --color-gold-100: #f5ecd2;
+  --color-gold-200: #ebd7a3;
+  --color-gold-300: #e0c278;
+  --color-gold-400: #d4ad56;
+  --color-gold-500: #c39640;
+  --color-gold-600: #a67b31;
+  --color-gold-700: #85602a;
+
+  /* Soft, layered shadows: cards rest on the page, menus and dialogs float above it */
+  --shadow-card: 0 1px 2px rgb(16 26 69 / 0.04), 0 4px 16px -6px rgb(16 26 69 / 0.08);
+  --shadow-raised: 0 2px 4px rgb(16 18 27 / 0.04), 0 12px 28px -8px rgb(16 18 27 / 0.12);
+  --shadow-float: 0 4px 8px rgb(16 18 27 / 0.04), 0 24px 56px -12px rgb(16 18 27 / 0.28);
+}
+
+:root {
+  /* The page behind the white cards (and the floating sidebar): a cool, very light blue-grey */
+  --canvas: #f2f4f9;
+  /* The band behind each page's title: the logo's blue, deep to bright, with a warm glow of its orange */
+  --band: radial-gradient(90% 140% at 100% 0%, rgb(253 106 4 / 0.22), transparent 55%),
+    linear-gradient(120deg, #101a45 0%, #1b318b 45%, #2449d8 100%);
 }
 
 /* Phones with a short screen (iPhone SE, small Androids): `short:` tightens a page to fit on them */
 @custom-variant short (@media (max-width: 39.99rem) and (max-height: 40rem));
 
 body {
-  background: var(--color-slate-50);
+  background: var(--canvas);
   color: var(--color-slate-900);
   font-feature-settings: "cv11", "ss01";
 }
@@ -83,9 +107,9 @@ html[data-modal-open="true"] {
     --color-slate-900: #ededf0;
     --color-slate-950: #f7f7f8;
 
-    --color-brand-50: #1a1b31;
-    --color-brand-100: #212343;
-    --color-brand-200: #2d305c;
+    --color-brand-50: #141c38;
+    --color-brand-100: #1a2550;
+    --color-brand-200: #24336b;
     --color-accent-50: #2c1a0c;
     --color-accent-100: #3d240e;
     --color-accent-200: #5e3614;
@@ -105,6 +129,13 @@ html[data-modal-open="true"] {
 
     /* Cards, boxes and menus */
     --surface: #141518;
+    --canvas: #0b0d14;
+    --band: radial-gradient(90% 140% at 100% 0%, rgb(253 106 4 / 0.14), transparent 55%), linear-gradient(120deg, #0a1030 0%, #131f5c 50%, #1b318b 100%);
+    --color-gold-50: #241d0f;
+    --color-gold-100: #30260f;
+    --shadow-card: 0 1px 2px rgb(0 0 0 / 0.4);
+    --shadow-raised: 0 12px 28px -8px rgb(0 0 0 / 0.6);
+    --shadow-float: 0 24px 56px -12px rgb(0 0 0 / 0.7);
   }
 
   [data-theme="dark"] .bg-white {
@@ -154,13 +185,16 @@ html[data-modal-open="true"] {
     color: #7dd3fc;
   }
   [data-theme="dark"] :is(.text-brand-600, .text-brand-700) {
-    color: #9aa1f2;
+    color: #93b1ff;
   }
   [data-theme="dark"] :is(.text-brand-800, .text-brand-900) {
-    color: #bcc0f7;
+    color: #bfd1ff;
   }
   [data-theme="dark"] :is(.text-accent-700, .text-accent-800) {
     color: #ffa463;
+  }
+  [data-theme="dark"] :is(.text-gold-600, .text-gold-700) {
+    color: #e0c278;
   }
   /* …but not on the blue table headings and buttons, which stay white-on-blue */
   [data-theme="dark"] :is(.bg-brand-600, .bg-brand-700, .bg-brand-800) :is(.text-brand-700, .text-brand-800) {
@@ -256,4 +290,14 @@ input[type="date"]::-webkit-calendar-picker-indicator,
 input[type="time"]::-webkit-calendar-picker-indicator {
   opacity: 0.55;
   cursor: pointer;
+}
+
+/* The bar along the top of the page while a sidebar link's page opens (app-shell NavProgress) */
+@keyframes nav-progress {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(300%);
+  }
 }

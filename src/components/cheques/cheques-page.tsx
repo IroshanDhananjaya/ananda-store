@@ -11,7 +11,7 @@ import { DateRangePicker, inDateRange, type DateRange } from "@/components/ui/da
 import { Select } from "@/components/ui/form";
 import { Card, CardHeader, FilterTabs, PageHeader, SearchInput, SummaryTile, TableFooter, Toolbar } from "@/components/ui/layout";
 import { Pagination, usePagination } from "@/components/ui/pagination";
-import { EmptyRow, Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
+import { EmptyRow, Table, TBody, TD, TH, THead, TR, useRowSort } from "@/components/ui/table";
 import { isPaid } from "@/lib/ledger";
 import { useAppStore, useRouteMap, useSaleDues, useShopMap } from "@/lib/store";
 import { OPENING_BILL, type Payment, type Sale } from "@/lib/types";
@@ -211,7 +211,30 @@ function CreditBills({ bills }: { bills: CreditBill[] }) {
       (a, b) =>
         Number(!isOpen(a)) - Number(!isOpen(b)) || (isOpen(a) ? a.dueDate.localeCompare(b.dueDate) : b.collectedDate.localeCompare(a.collectedDate)),
     );
-  const pager = usePagination(rows, [filter, routeId, query, bills.length]);
+  // A column header sorts every bill (not just this page)
+  const sorter = useRowSort(rows, {
+    bill: (b) => b.sale?.saleNo ?? "Opening balance",
+    store: (b) => shopMap.get(b.shopId)?.shopName ?? "Deleted store",
+    delivered: (b) => b.date,
+    end: (b) => b.dueDate,
+    credit: (b) => b.credit,
+    collected: (b) => b.collected,
+    balance: (b) => b.due,
+    // The badge's label (dates as yyyy-mm-dd so they sort right)
+    status: (b) =>
+      !isOpen(b)
+        ? `Collected ${b.collectedDate}`
+        : !Number.isFinite(b.daysLeft)
+          ? "To collect"
+          : b.daysLeft < 0
+            ? `Overdue ${plural(-b.daysLeft, "day")}`
+            : b.daysLeft <= DUE_SOON_DAYS
+              ? b.daysLeft === 0
+                ? "Due today"
+                : `Due in ${plural(b.daysLeft, "day")}`
+              : `${plural(b.daysLeft, "day")} left`,
+  });
+  const pager = usePagination(sorter.rows, [filter, routeId, query, bills.length, sorter.key]);
 
   return (
     <Card className="mt-6">
@@ -246,14 +269,20 @@ function CreditBills({ bills }: { bills: CreditBill[] }) {
       <Table>
         <THead>
           <tr>
-            <TH>Bill</TH>
-            <TH>Store</TH>
-            <TH>Delivered</TH>
-            <TH>End Date</TH>
-            <TH className="text-right">Credit</TH>
-            <TH className="text-right">Collected</TH>
-            <TH className="text-right">Balance</TH>
-            <TH>Status</TH>
+            <TH sort={sorter.column("bill")}>Bill</TH>
+            <TH sort={sorter.column("store")}>Store</TH>
+            <TH sort={sorter.column("delivered")}>Delivered</TH>
+            <TH sort={sorter.column("end")}>End Date</TH>
+            <TH className="text-right" sort={sorter.column("credit")}>
+              Credit
+            </TH>
+            <TH className="text-right" sort={sorter.column("collected")}>
+              Collected
+            </TH>
+            <TH className="text-right" sort={sorter.column("balance")}>
+              Balance
+            </TH>
+            <TH sort={sorter.column("status")}>Status</TH>
           </tr>
         </THead>
         <TBody>
@@ -339,7 +368,17 @@ function Cheques({ cheques }: { cheques: Payment[] }) {
     })
     // Soonest cheque date first (no date last)
     .sort((a, b) => (a.chequeDate || "9999").localeCompare(b.chequeDate || "9999") || a.receiptNo.localeCompare(b.receiptNo));
-  const pager = usePagination(rows, [filter, query, cheques.length]);
+  // A column header sorts every cheque (not just this page)
+  const sorter = useRowSort(rows, {
+    cheque: (p) => p.chequeNumber,
+    store: (p) => shopMap.get(p.shopId)?.shopName ?? "Deleted store",
+    date: (p) => p.chequeDate,
+    amount: (p) => p.amount,
+    note: (p) => p.reference,
+    // The badge's label (dates as yyyy-mm-dd so they sort right)
+    status: (p) => (p.chequeCollectedDate ? `Collected ${p.chequeCollectedDate}` : "To collect"),
+  });
+  const pager = usePagination(sorter.rows, [filter, query, cheques.length, sorter.key]);
 
   async function mark(p: Payment, date: string) {
     const result = await markChequeCollected(p.id, date);
@@ -371,12 +410,14 @@ function Cheques({ cheques }: { cheques: Payment[] }) {
       <Table>
         <THead>
           <tr>
-            <TH>Cheque</TH>
-            <TH>Store</TH>
-            <TH>Cheque Date</TH>
-            <TH className="text-right">Amount</TH>
-            <TH>Note</TH>
-            <TH>Status</TH>
+            <TH sort={sorter.column("cheque")}>Cheque</TH>
+            <TH sort={sorter.column("store")}>Store</TH>
+            <TH sort={sorter.column("date")}>Cheque Date</TH>
+            <TH className="text-right" sort={sorter.column("amount")}>
+              Amount
+            </TH>
+            <TH sort={sorter.column("note")}>Note</TH>
+            <TH sort={sorter.column("status")}>Status</TH>
             <TH className="w-40">
               <span className="sr-only">Actions</span>
             </TH>

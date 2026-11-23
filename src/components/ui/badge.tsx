@@ -4,13 +4,13 @@ import { cn } from "@/lib/utils";
 
 type Tone = "green" | "amber" | "red" | "blue" | "slate";
 
-// Linear-style: a quiet outlined pill; the dot carries the colour (red text too, so problems stand out)
+// A soft tinted pill: the colour is in the fill, the dot and the text, so a status reads at a glance
 const tones: Record<Tone, string> = {
-  green: "text-slate-700",
-  amber: "text-slate-700",
-  red: "text-red-700",
-  blue: "text-slate-700",
-  slate: "text-slate-500",
+  green: "border-emerald-200/70 bg-emerald-50 text-emerald-800",
+  amber: "border-amber-200/80 bg-amber-50 text-amber-800",
+  red: "border-red-200/80 bg-red-50 text-red-700",
+  blue: "border-sky-200/80 bg-sky-50 text-sky-800",
+  slate: "border-slate-200 bg-slate-50 text-slate-600",
 };
 
 const dots: Record<Tone, string> = {
@@ -25,7 +25,7 @@ export function Badge({ tone = "slate", children, className }: { tone?: Tone; ch
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2 py-px text-xs font-medium whitespace-nowrap",
+        "inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-xs font-medium whitespace-nowrap",
         tones[tone],
         className,
       )}
@@ -38,7 +38,8 @@ export function Badge({ tone = "slate", children, className }: { tone?: Tone; ch
 
 type OrderStep = BillStatus | "Ordered" | "Loaded" | "Cancelled";
 const billTone: Record<OrderStep, Tone> = { Ordered: "slate", Loaded: "blue", Paid: "green", "Part paid": "amber", Unpaid: "red", Cancelled: "slate" };
-const billLabel: Record<OrderStep, string> = {
+/** The words each bill status badge shows (also what a Status column sorts by) */
+export const billLabel: Record<OrderStep, string> = {
   Ordered: "To load",
   Loaded: "On lorry",
   Paid: "Paid",
@@ -110,7 +111,8 @@ export function DayChips({ days }: { days: string[] }) {
 }
 
 const orderTone: Record<OrderStatus, Tone> = { Pending: "amber", Received: "blue", Partial: "blue", Posted: "green" };
-const orderLabel: Record<OrderStatus, string> = {
+/** The words each purchase order status badge shows */
+export const orderLabel: Record<OrderStatus, string> = {
   Pending: "Pending delivery",
   Received: "Received",
   Partial: "Partly in stock",
@@ -122,7 +124,8 @@ export function OrderStatusBadge({ status }: { status: OrderStatus }) {
 }
 
 const lineTone: Record<LineStatus, Tone> = { Pending: "slate", Match: "green", Unmatch: "red", Missing: "red", Extra: "blue" };
-const lineLabel: Record<LineStatus, string> = { Pending: "Pending", Match: "Match", Unmatch: "Unmatch", Missing: "Missing", Extra: "Not ordered" };
+/** The words each order line status badge shows */
+export const lineLabel: Record<LineStatus, string> = { Pending: "Pending", Match: "Match", Unmatch: "Unmatch", Missing: "Missing", Extra: "Not ordered" };
 
 export function LineStatusBadge({ status }: { status: LineStatus }) {
   return <Badge tone={lineTone[status]}>{lineLabel[status]}</Badge>;

@@ -9,7 +9,7 @@ import { Field, Input } from "@/components/ui/form";
 import { Card, PageHeader, SearchInput, TableFooter, Toolbar } from "@/components/ui/layout";
 import { Modal } from "@/components/ui/modal";
 import { Pagination, usePagination } from "@/components/ui/pagination";
-import { EmptyRow, RowActions, Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
+import { EmptyRow, RowActions, Table, TBody, TD, TH, THead, TR, useRowSort } from "@/components/ui/table";
 import { useAppStore } from "@/lib/store";
 import type { StoreLocation } from "@/lib/types";
 import { useDialog } from "@/lib/use-dialog";
@@ -100,7 +100,15 @@ export function LocationsPage() {
   const rows = locations.filter((l) => includesText([l.locationNumber, l.itemGroup], query));
   const editing = form.target === "new" ? null : form.target;
 
-  const pager = usePagination(rows, [query]);
+  // A column header sorts every location (not just this page)
+  const sorter = useRowSort(rows, {
+    number: (l) => l.locationNumber,
+    group: (l) => l.itemGroup,
+    items: (l) => itemCount.get(l.locationNumber) ?? 0,
+    lines: (l) => usage.get(l.locationNumber)?.lines ?? 0,
+    qty: (l) => usage.get(l.locationNumber)?.qty ?? 0,
+  });
+  const pager = usePagination(sorter.rows, [query, sorter.key]);
 
   return (
     <>
@@ -121,11 +129,17 @@ export function LocationsPage() {
         <Table>
           <THead>
             <tr>
-              <TH>Location Number</TH>
-              <TH>Item Group</TH>
-              <TH className="text-right">Items</TH>
-              <TH className="text-right">Stock Lines</TH>
-              <TH className="text-right">Available Qty</TH>
+              <TH sort={sorter.column("number")}>Location Number</TH>
+              <TH sort={sorter.column("group")}>Item Group</TH>
+              <TH className="text-right" sort={sorter.column("items")}>
+                Items
+              </TH>
+              <TH className="text-right" sort={sorter.column("lines")}>
+                Stock Lines
+              </TH>
+              <TH className="text-right" sort={sorter.column("qty")}>
+                Available Qty
+              </TH>
               <TH className="w-24">
                 <span className="sr-only">Actions</span>
               </TH>

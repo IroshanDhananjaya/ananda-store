@@ -8,7 +8,7 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Select } from "@/components/ui/form";
 import { Card, PageHeader, SearchInput, TableFooter, Toolbar } from "@/components/ui/layout";
 import { Pagination, usePagination } from "@/components/ui/pagination";
-import { EmptyRow, GroupRow, RowActions, Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
+import { EmptyRow, GroupRow, RowActions, Table, TBody, TD, TH, THead, TR, useRowSort } from "@/components/ui/table";
 import { categoryOf, compareByCategory } from "@/lib/categories";
 import { useAppStore, useCategoryRanks } from "@/lib/store";
 import type { Item } from "@/lib/types";
@@ -49,7 +49,19 @@ export function ItemsPage() {
     .sort((a, b) => compareByCategory(ranks, a, b));
   const perCategory = Map.groupBy(rows, categoryOf);
 
-  const pager = usePagination(rows, [query, location, category]);
+  // A column header sorts every item (not just this page); the category headings step aside meanwhile
+  const sorter = useRowSort(rows, {
+    code: (i) => i.sapCode,
+    name: (i) => i.description,
+    pack: (i) => i.packageDetails,
+    uom: (i) => i.uom,
+    location: (i) => i.locationNumber,
+    cost: (i) => (i.costPrice > 0 ? i.costPrice : null),
+    wholesale: (i) => i.wholesalePrice,
+    retail: (i) => (i.retailPrice > 0 ? i.retailPrice : null),
+    stock: (i) => availableBySap.get(i.sapCode) ?? 0,
+  });
+  const pager = usePagination(sorter.rows, [query, location, category, sorter.key]);
 
   return (
     <>
@@ -87,15 +99,23 @@ export function ItemsPage() {
         <Table>
           <THead>
             <tr>
-              <TH>SAP Code</TH>
-              <TH>Item Description</TH>
-              <TH>Package Details</TH>
-              <TH>UOM</TH>
-              <TH>Location</TH>
-              <TH className="text-right">Cost</TH>
-              <TH className="text-right">Wholesale</TH>
-              <TH className="text-right">Retail</TH>
-              <TH className="text-right">In Stock</TH>
+              <TH sort={sorter.column("code")}>SAP Code</TH>
+              <TH sort={sorter.column("name")}>Item Description</TH>
+              <TH sort={sorter.column("pack")}>Package Details</TH>
+              <TH sort={sorter.column("uom")}>UOM</TH>
+              <TH sort={sorter.column("location")}>Location</TH>
+              <TH className="text-right" sort={sorter.column("cost")}>
+                Cost
+              </TH>
+              <TH className="text-right" sort={sorter.column("wholesale")}>
+                Wholesale
+              </TH>
+              <TH className="text-right" sort={sorter.column("retail")}>
+                Retail
+              </TH>
+              <TH className="text-right" sort={sorter.column("stock")}>
+                In Stock
+              </TH>
               <TH className="w-24">
                 <span className="sr-only">Actions</span>
               </TH>
@@ -106,7 +126,7 @@ export function ItemsPage() {
             {pager.pageRows.map((item, i) => (
               <Fragment key={item.id}>
                 {/* A category heading where it starts, and on top of each page */}
-                {(i === 0 || categoryOf(item) !== categoryOf(pager.pageRows[i - 1])) && (
+                {!sorter.active && (i === 0 || categoryOf(item) !== categoryOf(pager.pageRows[i - 1])) && (
                   <GroupRow colSpan={10}>
                     {categoryOf(item)} <span className="font-normal text-slate-500 normal-case">· {perCategory.get(categoryOf(item))?.length ?? 0} items</span>
                   </GroupRow>

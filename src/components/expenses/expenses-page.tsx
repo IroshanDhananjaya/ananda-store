@@ -10,7 +10,7 @@ import { Field, Input, ReadOnlyValue, Select, toNumber } from "@/components/ui/f
 import { Card, FilterTabs, PageHeader, SearchInput, TableFooter, Toolbar } from "@/components/ui/layout";
 import { Modal } from "@/components/ui/modal";
 import { Pagination, usePagination } from "@/components/ui/pagination";
-import { EmptyRow, RowActions, Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
+import { EmptyRow, RowActions, Table, TBody, TD, TH, THead, TR, useRowSort } from "@/components/ui/table";
 import { useAppStore } from "@/lib/store";
 import { EXPENSE_CATEGORIES, PAYMENT_METHODS, type Expense, type ExpenseCategory, type PaymentMethod } from "@/lib/types";
 import { useDialog } from "@/lib/use-dialog";
@@ -112,7 +112,16 @@ export function ExpensesPage() {
   const total = rows.reduce((sum, e) => sum + e.amount, 0);
   const editing = form.target === "new" ? null : form.target;
 
-  const pager = usePagination(rows, [query, range, category]);
+  // A column header sorts every expense (not just this page)
+  const sorter = useRowSort(rows, {
+    no: (e) => e.expenseNo,
+    date: (e) => e.date,
+    category: (e) => e.category,
+    description: (e) => e.description,
+    method: (e) => e.method,
+    amount: (e) => e.amount,
+  });
+  const pager = usePagination(sorter.rows, [query, range, category, sorter.key]);
 
   return (
     <>
@@ -142,12 +151,14 @@ export function ExpensesPage() {
         <Table>
           <THead>
             <tr>
-              <TH>Expense No.</TH>
-              <TH>Date</TH>
-              <TH>Category</TH>
-              <TH>Description</TH>
-              <TH>Paid by</TH>
-              <TH className="text-right">Amount</TH>
+              <TH sort={sorter.column("no")}>Expense No.</TH>
+              <TH sort={sorter.column("date")}>Date</TH>
+              <TH sort={sorter.column("category")}>Category</TH>
+              <TH sort={sorter.column("description")}>Description</TH>
+              <TH sort={sorter.column("method")}>Paid by</TH>
+              <TH className="text-right" sort={sorter.column("amount")}>
+                Amount
+              </TH>
               <TH className="w-24">
                 <span className="sr-only">Actions</span>
               </TH>
